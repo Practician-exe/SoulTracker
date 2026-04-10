@@ -103,8 +103,6 @@
   // Group name used for our notifications so we can clear them before redrawing.
   var OVERLAY_GROUP = "st_soul";
   var MANUAL_GROUP = "st_manual";
-  var manualPickTimer = null;
-  var manualPickInterval = null;
   var manualSelectionStart = null;
 
   /**
@@ -191,13 +189,6 @@
     } catch (_e) {}
   }
 
-  function clearManualSelectionTimers() {
-    clearTimeout(manualPickTimer);
-    clearInterval(manualPickInterval);
-    manualPickTimer = null;
-    manualPickInterval = null;
-  }
-
   function setButtonsDisabled(disabled) {
     btnManual.disabled = disabled;
     btnClearManual.disabled = disabled;
@@ -237,36 +228,6 @@
     return true;
   }
 
-  function captureMouseAfterCountdown(label, seconds, done) {
-    clearManualSelectionTimers();
-    var remaining = seconds;
-    var lastValidPos = null;
-
-    manualPickInterval = setInterval(function () {
-      var pos = getRsMousePos();
-      if (pos) {
-        lastValidPos = pos;
-      }
-    }, 100);
-
-    function tick() {
-      statusEl.textContent =
-        "Manual select: hover " + label + " over the visible chat text area in RS3. Capturing in " + remaining + "...";
-
-      if (remaining <= 0) {
-        clearManualSelectionTimers();
-        var pos = getRsMousePos() || lastValidPos;
-        done(pos);
-        return;
-      }
-
-      remaining--;
-      manualPickTimer = setTimeout(tick, 1000);
-    }
-
-    tick();
-  }
-
   function startManualSelection() {
     if (!inAlt1) {
       statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
@@ -281,45 +242,43 @@
       return;
     }
 
-    setButtonsDisabled(true);
-    clearManualOverlay();
+    var pos = getRsMousePos();
+    if (!pos) {
+      statusEl.textContent = "Manual select failed: move your mouse over the RS3 window, then click Manual select.";
+      return;
+    }
+
+    if (!manualSelectionStart) {
+      manualSelectionStart = pos;
+      clearManualOverlay();
+      showRectOverlay(
+        { x: pos.x - 3, y: pos.y - 3, width: 6, height: 6 },
+        A1lib.mixColor(201, 166, 75),
+        5000,
+        MANUAL_GROUP
+      );
+      statusEl.textContent = "Top-left captured. Move to the bottom-right of the chat text area and click Manual select again.";
+      return;
+    }
+
+    var rect = normalizeRect(manualSelectionStart, pos);
+    if (rect.width < 120 || rect.height < 40) {
+      manualSelectionStart = null;
+      clearManualOverlay();
+      statusEl.textContent = "Manual select failed: the selected area was too small. Start again from the top-left corner.";
+      return;
+    }
+
     manualSelectionStart = null;
-
-    captureMouseAfterCountdown("TOP-LEFT", 3, function (topLeft) {
-      if (!topLeft) {
-        setButtonsDisabled(false);
-        statusEl.textContent = "Manual select failed: keep your mouse over the RS3 window during capture.";
-        return;
-      }
-
-       manualSelectionStart = topLeft;
-       showRectOverlay({ x: topLeft.x - 2, y: topLeft.y - 2, width: 4, height: 4 }, A1lib.mixColor(201, 166, 75), 3500, MANUAL_GROUP);
-
-      captureMouseAfterCountdown("BOTTOM-RIGHT", 3, function (bottomRight) {
-        setButtonsDisabled(false);
-        if (!bottomRight) {
-          statusEl.textContent = "Manual select failed: keep your mouse over the RS3 window during capture.";
-          return;
-        }
-
-        var rect = normalizeRect(topLeft, bottomRight);
-        if (rect.width < 120 || rect.height < 40) {
-          statusEl.textContent = "Manual select failed: the selected area was too small. Try again.";
-          return;
-        }
-
-        if (!applyManualRect(rect)) {
-          statusEl.textContent = "Manual select failed: chat reader is not available.";
-        }
-      });
-    });
+    if (!applyManualRect(rect)) {
+      statusEl.textContent = "Manual select failed: chat reader is not available.";
+    }
   }
   btnManual.addEventListener("click", () => {
     startManualSelection();
   });
 
   btnClearManual.addEventListener("click", () => {
-    clearManualSelectionTimers();
     manualSelectionStart = null;
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
