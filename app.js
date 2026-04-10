@@ -1,8 +1,8 @@
 (() => {
   const statusEl = document.getElementById("status");
-  const toastEl = document.getElementById("toast");
-  const toastTitleEl = document.getElementById("toastTitle");
-  const toastBodyEl = document.getElementById("toastBody");
+  const alertPanelEl = document.getElementById("alertPanel");
+  const alertTitleEl = document.getElementById("alertTitle");
+  const alertBodyEl = document.getElementById("alertBody");
   const audioEl = document.getElementById("alertAudio");
   const selectorModalEl = document.getElementById("selectorModal");
   const selectorCanvasEl = document.getElementById("selectorCanvas");
@@ -101,6 +101,7 @@
   if (typeof state.scanMs === "number") scanMsEl.value = String(state.scanMs);
   if (typeof state.enableSound === "boolean") enableSoundEl.checked = state.enableSound;
   if (typeof state.volume === "number") volumeEl.value = String(state.volume);
+  setAlertPanelIdle();
 
   var MANUAL_GROUP = "st_manual";
   var manualSelectionActive = false;
@@ -173,6 +174,13 @@
     saveState(state);
   }
 
+  function setAlertPanelIdle() {
+    alertPanelEl.classList.remove("alertPanel--active", "alertPanel--danger");
+    alertPanelEl.classList.add("alertPanel--idle");
+    alertTitleEl.textContent = "No soul detected";
+    alertBodyEl.textContent = "Watching chat...";
+  }
+
   function applyManualRect(rect) {
     if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) return false;
     rect = clampRectToRs(rect);
@@ -182,6 +190,7 @@
     persistManualRect(rect);
     showRectOverlay(rect, A1lib.mixColor(57, 210, 106), 3500, MANUAL_GROUP);
     statusEl.textContent = "Manual chat area saved. Watching chat...";
+    setAlertPanelIdle();
     return true;
   }
 
@@ -270,6 +279,7 @@
     persistManualRect(null);
     clearManualOverlay();
     statusEl.textContent = "Manual chat area cleared. Click Manual select to choose it again.";
+    setAlertPanelIdle();
   });
 
   btnTest.addEventListener("click", () => {
@@ -519,23 +529,18 @@
   }
 
   function fireAlert(det) {
-    showToast(det);
+    showAlertPanel(det);
     if (enableSoundEl.checked) {
       playSound();
     }
   }
 
-  function showToast(det) {
+  function showAlertPanel(det) {
     const isRed = det.type === "vengeful";
-    toastEl.classList.remove("toast--green", "toast--red");
-    toastEl.classList.add(isRed ? "toast--red" : "toast--green");
-
-    toastTitleEl.textContent = "Soul detected";
-    toastBodyEl.textContent = det.message;
-
-    toastEl.classList.add("show");
-    clearTimeout(showToast._t);
-    showToast._t = setTimeout(() => toastEl.classList.remove("show"), 4000);
+    alertPanelEl.classList.remove("alertPanel--idle", "alertPanel--active", "alertPanel--danger");
+    alertPanelEl.classList.add(isRed ? "alertPanel--danger" : "alertPanel--active");
+    alertTitleEl.textContent = "Soul detected";
+    alertBodyEl.textContent = det.message;
   }
 
   function playSound() {
