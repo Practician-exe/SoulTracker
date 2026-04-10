@@ -35,7 +35,9 @@
   let messageTemplates = null;
   let templatesReady = false;
   let templateLoadError = null;
-  const TEMPLATE_MATCH_MAX = 80;
+  const TEMPLATE_MATCH_MAX = 120;
+  const TEMPLATE_SCAN_PADDING_X = 24;
+  const TEMPLATE_SCAN_PADDING_Y = 10;
 
   // ---- Helpers
 
@@ -158,7 +160,7 @@
       var fg = A1lib.mixColor(239, 232, 214);
       var fgSoft = A1lib.mixColor(186, 176, 153);
       var ms = 4200;
-      var body = det.message.length > 58 ? det.message.slice(0, 55) + "..." : det.message;
+      var body = det.message.length > 52 ? det.message.slice(0, 49) + "..." : det.message;
 
       alt1.overLayClearGroup(OVERLAY_GROUP);
       alt1.overLaySetGroup(OVERLAY_GROUP);
@@ -179,7 +181,7 @@
       alt1.overLayText("detected nearby", fgSoft, 11, ox + 28, oy + 56, ms);
 
       // Message body
-      alt1.overLayText(body, fg, 11, ox + 28, oy + 73, ms);
+      alt1.overLayText(body, fg, 11, ox + 28, oy + 71, ms);
       alt1.overLayFreezeGroup(OVERLAY_GROUP);
       return true;
     } catch (e) {
@@ -240,6 +242,15 @@
       width: Math.max(1, Math.min(rect.width, maxWidth)),
       height: Math.max(1, Math.min(rect.height, maxHeight)),
     };
+  }
+
+  function expandRect(rect, padX, padY) {
+    return clampRectToRs({
+      x: rect.x - padX,
+      y: rect.y - padY,
+      width: rect.width + padX * 2,
+      height: rect.height + padY * 2,
+    });
   }
 
   function persistManualRect(rect) {
@@ -462,8 +473,12 @@
     var keywordWidth = Math.min(120, image.width);
     var keywordX = Math.max(0, Math.floor((image.width - keywordWidth) / 2));
     var middle = cropImage(image, keywordX, 0, keywordWidth, image.height);
+    var rightWidth = Math.min(140, image.width);
+    var right = cropImage(image, Math.max(0, image.width - rightWidth), 0, rightWidth, image.height);
+    var leadWidth = Math.min(92, image.width);
+    var lead = cropImage(image, 0, 0, leadWidth, image.height);
 
-    return [left, middle, full];
+    return [lead, left, middle, right, full];
   }
 
   function hasTemplateMatch(captured, templates) {
@@ -487,7 +502,7 @@
   function detectSoulTemplates(rect) {
     if (!templatesReady || !messageTemplates || !rect) return [];
 
-    rect = clampRectToRs(rect);
+    rect = expandRect(clampRectToRs(rect), TEMPLATE_SCAN_PADDING_X, TEMPLATE_SCAN_PADDING_Y);
     var captured = A1lib.capture(rect.x, rect.y, rect.width, rect.height);
     if (!captured) return [];
 
@@ -558,6 +573,14 @@
     let detections;
     try {
       detections = detectSoulTemplates(rect);
+      if (detections.length === 0) {
+        try {
+          const lines = reader.read() || [];
+          detections = detectSoulsFromLines(lines);
+        } catch (_ocrError) {
+          detections = [];
+        }
+      }
     } catch (e) {
       console.error("[SoulTracker] template scan error:", e);
       detections = [];
@@ -591,7 +614,7 @@
       if (inAlt1) {
         shownInOverlay = showAlt1Overlay(det);
       }
-      if (!shownInOverlay) {
+      if (!shownInOverlay || !inAlt1) {
         showToast(det);
       }
     }
@@ -663,9 +686,9 @@
     const out = [];
     const candidates = [
       { type: "lost", aliases: ["lost"] },
-      { type: "mimicking", aliases: ["mimicking", "mimicling", "mlmicking"] },
-      { type: "unstable", aliases: ["unstable", "unstabie"] },
-      { type: "vengeful", aliases: ["vengeful", "vengefui"] },
+      { type: "mimicking", aliases: ["mimicking", "mimicling", "mlmicking", "mimickings"] },
+      { type: "unstable", aliases: ["unstable", "unstabie", "unstab1e"] },
+      { type: "vengeful", aliases: ["vengeful", "vengefui", "vengefuls"] },
     ];
 
     for (const c of candidates) {
