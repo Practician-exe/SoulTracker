@@ -1,6 +1,5 @@
 (() => {
   const statusEl = document.getElementById("status");
-  const logEl = document.getElementById("log");
   const toastEl = document.getElementById("toast");
   const toastTitleEl = document.getElementById("toastTitle");
   const toastBodyEl = document.getElementById("toastBody");
@@ -36,6 +35,7 @@
   let messageTemplates = null;
   let templatesReady = false;
   let templateLoadError = null;
+  const TEMPLATE_MATCH_MAX = 80;
 
   // ---- Helpers
 
@@ -412,7 +412,7 @@
       const entries = await Promise.all(
         Object.entries(TEMPLATE_PATHS).map(async ([type, url]) => {
           const image = await A1lib.imageDataFromUrl(new URL(url, window.location.href).href);
-          return [type, image];
+          return [type, buildTemplateSignatures(image)];
         })
       );
 
@@ -435,6 +435,42 @@
     });
   }
 
+  function cropImage(source, x, y, width, height) {
+    var out = new A1lib.ImageData(width, height);
+    source.copyTo(out, x, y, width, height, 0, 0);
+    return out;
+  }
+
+  function buildTemplateSignatures(image) {
+    var full = image;
+    var leftWidth = Math.min(image.width, 180);
+    var left = cropImage(image, 0, 0, leftWidth, image.height);
+
+    var keywordWidth = Math.min(120, image.width);
+    var keywordX = Math.max(0, Math.floor((image.width - keywordWidth) / 2));
+    var middle = cropImage(image, keywordX, 0, keywordWidth, image.height);
+
+    return [left, middle, full];
+  }
+
+  function hasTemplateMatch(captured, templates) {
+    for (const template of templates) {
+      var maxX = captured.width - template.width;
+      var maxY = captured.height - template.height;
+      if (maxX < 0 || maxY < 0) continue;
+
+      for (var y = 0; y <= maxY; y++) {
+        for (var x = 0; x <= maxX; x++) {
+          var score = captured.pixelCompare(template, x, y, TEMPLATE_MATCH_MAX);
+          if (isFinite(score)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   function detectSoulTemplates(rect) {
     if (!templatesReady || !messageTemplates || !rect) return [];
 
@@ -443,9 +479,8 @@
     if (!captured) return [];
 
     const detections = [];
-    Object.entries(messageTemplates).forEach(([type, template]) => {
-      const matches = captured.findSubimage(template);
-      const found = matches && matches.length > 0;
+    Object.entries(messageTemplates).forEach(([type, templates]) => {
+      const found = hasTemplateMatch(captured, templates);
       if (found && !visibleMatches[type]) {
         detections.push({ type: type, message: prettyMessage(type) });
       }
@@ -538,8 +573,6 @@
   }
 
   function fireAlert(det) {
-    addLogLine(det.type, det.message);
-
     if (enableVisualEl.checked) {
       var shownInOverlay = false;
       if (inAlt1) {
@@ -552,23 +585,6 @@
     if (enableSoundEl.checked) {
       playSound();
     }
-  }
-
-  function addLogLine(type, message) {
-    const line = document.createElement("div");
-    line.className = "logLine";
-    line.innerHTML =
-      '<div>' +
-        '<span class="logType">' + escapeHtml(type.toUpperCase()) + '</span>' +
-        '<div style="margin-top:4px; color: rgba(231,224,207,.75); font-size: 12px;">' +
-          escapeHtml(message) +
-        '</div>' +
-      '</div>' +
-      '<div class="logTime">' + new Date().toLocaleTimeString() + '</div>';
-    logEl.prepend(line);
-
-    // keep last ~10
-    while (logEl.children.length > 10) logEl.removeChild(logEl.lastChild);
   }
 
   function showToast(det) {
