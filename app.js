@@ -105,6 +105,12 @@
   var MANUAL_GROUP = "st_manual";
   var manualSelectionStart = null;
   var manualSelectionActive = false;
+  var manualSelectionPhase = null;
+  var armedCaptureInterval = null;
+  var armedCaptureLastPos = null;
+  var armedCaptureStableMs = 0;
+  var lastCaptureTickAt = 0;
+  var ARMED_CAPTURE_THRESHOLD_MS = 500;
 
   /**
    * Draw a native Alt1 overlay notification near the current mouse position.
@@ -190,6 +196,14 @@
     } catch (_e) {}
   }
 
+  function stopArmedCapture() {
+    clearInterval(armedCaptureInterval);
+    armedCaptureInterval = null;
+    armedCaptureLastPos = null;
+    armedCaptureStableMs = 0;
+    lastCaptureTickAt = 0;
+  }
+
   function setButtonsDisabled(disabled) {
     btnManual.disabled = disabled;
     btnClearManual.disabled = disabled;
@@ -229,6 +243,51 @@
     return true;
   }
 
+  function samePoint(a, b) {
+    if (!a || !b) return false;
+    return Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2;
+  }
+
+  function startArmedCapture(phase, onCapture) {
+    stopArmedCapture();
+    manualSelectionActive = true;
+    manualSelectionPhase = phase;
+    lastCaptureTickAt = Date.now();
+
+    armedCaptureInterval = setInterval(function () {
+      var now = Date.now();
+      var dt = now - lastCaptureTickAt;
+      lastCaptureTickAt = now;
+
+      var pos = getRsMousePos();
+      if (!pos) {
+        armedCaptureLastPos = null;
+        armedCaptureStableMs = 0;
+        statusEl.textContent =
+          "Manual select: move your mouse over the " + phase + " corner inside the RS3 chat area and hold it still.";
+        return;
+      }
+
+      if (samePoint(pos, armedCaptureLastPos)) {
+        armedCaptureStableMs += dt;
+      } else {
+        armedCaptureLastPos = pos;
+        armedCaptureStableMs = 0;
+      }
+
+      var remaining = Math.max(0, ARMED_CAPTURE_THRESHOLD_MS - armedCaptureStableMs);
+      statusEl.textContent =
+        "Manual select: hold on the " + phase + " corner inside the RS3 chat area for " +
+        Math.ceil(remaining / 100) / 10 + "s.";
+
+      if (armedCaptureStableMs >= ARMED_CAPTURE_THRESHOLD_MS) {
+        var captured = armedCaptureLastPos;
+        stopArmedCapture();
+        onCapture(captured);
+      }
+    }, 50);
+  }
+
   function startManualSelection() {
     if (!inAlt1) {
       statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
@@ -243,39 +302,36 @@
       return;
     }
 
-    var pos = getRsMousePos();
-    if (!pos) {
-      statusEl.textContent = "Manual select failed: move your mouse over the RS3 window, then click Manual select.";
-      return;
-    }
-
     if (!manualSelectionStart) {
-      manualSelectionActive = true;
-      manualSelectionStart = pos;
       clearManualOverlay();
-      showRectOverlay(
-        { x: pos.x - 3, y: pos.y - 3, width: 6, height: 6 },
-        A1lib.mixColor(201, 166, 75),
-        5000,
-        MANUAL_GROUP
-      );
-      statusEl.textContent = "Top-left captured. Move to the bottom-right of the chat text area and click Manual select again.";
-      return;
-    }
+      startArmedCapture("top-left", function (pos) {
+        manualSelectionStart = pos;
+        showRectOverlay(
+          { x: pos.x - 3, y: pos.y - 3, width: 6, height: 6 },
+          A1lib.mixColor(201, 166, 75),
+          5000,
+          MANUAL_GROUP
+        );
+        startArmedCapture("bottom-right", function (bottomRight) {
+          var rect = normalizeRect(manualSelectionStart, bottomRight);
+          if (rect.width < 120 || rect.height < 40) {
+            manualSelectionActive = false;
+            manualSelectionPhase = null;
+            manualSelectionStart = null;
+            clearManualOverlay();
+            statusEl.textContent = "Manual select failed: the selected area was too small. Start again from the top-left corner.";
+            return;
+          }
 
-    var rect = normalizeRect(manualSelectionStart, pos);
-    if (rect.width < 120 || rect.height < 40) {
-      manualSelectionActive = false;
-      manualSelectionStart = null;
-      clearManualOverlay();
-      statusEl.textContent = "Manual select failed: the selected area was too small. Start again from the top-left corner.";
+          manualSelectionActive = false;
+          manualSelectionPhase = null;
+          manualSelectionStart = null;
+          if (!applyManualRect(rect)) {
+            statusEl.textContent = "Manual select failed: chat reader is not available.";
+          }
+        });
+      });
       return;
-    }
-
-    manualSelectionActive = false;
-    manualSelectionStart = null;
-    if (!applyManualRect(rect)) {
-      statusEl.textContent = "Manual select failed: chat reader is not available.";
     }
   }
   btnManual.addEventListener("click", () => {
@@ -283,7 +339,9 @@
   });
 
   btnClearManual.addEventListener("click", () => {
+    stopArmedCapture();
     manualSelectionActive = false;
+    manualSelectionPhase = null;
     manualSelectionStart = null;
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
