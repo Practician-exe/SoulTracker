@@ -1,0 +1,9 @@
+{
+  "name": "soultracker",
+  "version": "1.0.0",
+  "description": "Alt1 app for tracking RS3 soul events via chatbox",
+  "private": true,
+  "devDependencies": {
+    "alt1": "0.1.2"
+  }
+}
