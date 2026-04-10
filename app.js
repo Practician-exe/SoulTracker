@@ -6,7 +6,7 @@
   const toastBodyEl = document.getElementById("toastBody");
   const audioEl = document.getElementById("alertAudio");
 
-  const btnCalibrate = document.getElementById("btnCalibrate");
+  const btnRefresh = document.getElementById("btnRefresh");
   const btnTest = document.getElementById("btnTest");
 
   const cooldownSecEl = document.getElementById("cooldownSec");
@@ -19,10 +19,27 @@
 
   // ---- Alt1 presence checks
   const inAlt1 = typeof alt1 !== "undefined";
+  // When the app is browsed to in Alt1's built-in browser without being installed,
+  // alt1.permissionPixel is false and pixel capture is blocked by Alt1 itself.
+  const hasPixelPermission = inAlt1 && alt1.permissionPixel === true;
+
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
+  } else if (!hasPixelPermission) {
+    // Build an alt1://addapp/ link from the current page URL so the user can
+    // install the app with one click.
+    const configUrl =
+      window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
+    const installUrl = "alt1://addapp/" + configUrl;
+    statusEl.innerHTML =
+      "This app needs to be <strong>installed</strong> in Alt1 to scan the chatbox. " +
+      '<a href="' + installUrl + '" style="color:#57d26a">Click here to install</a>, ' +
+      "then reopen it from your Apps panel.";
+    btnRefresh.disabled = true;
+  } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
+    statusEl.textContent = "Chat reader library failed to load.";
   } else {
-    statusEl.textContent = "Alt1 detected. Calibrate chat area if needed.";
+    statusEl.textContent = "Alt1 detected. Locating chatbox...";
   }
 
   // ---- Cooldown bookkeeping: per soul type
@@ -33,35 +50,108 @@
     vengeful: 0,
   };
 
-  // Also dedupe on exact OCR text to reduce repeats from the same frame
-  let lastOcrHash = "";
-
   // ---- UI init from saved state
   if (typeof state.cooldownSec === "number") cooldownSecEl.value = String(state.cooldownSec);
   if (typeof state.scanMs === "number") scanMsEl.value = String(state.scanMs);
   if (typeof state.enableSound === "boolean") enableSoundEl.checked = state.enableSound;
   if (typeof state.enableVisual === "boolean") enableVisualEl.checked = state.enableVisual;
 
-  btnCalibrate.addEventListener("click", async () => {
-    if (!inAlt1) return;
+  // ---- Alt1 native overlay (shown near the mouse cursor over the RS3 window)
+  // Group name used for our notifications so we can clear them before redrawing.
+  var OVERLAY_GROUP = "st_soul";
+  var CALIBRATE_GROUP = "st_cal";
 
-    // Alt1 has built-in region selection helpers in some setups.
-    // If your Alt1 build doesn’t expose a helper, we can do manual entry instead.
-    //
-    // This tries to use alt1.overLayRect selection if available; otherwise falls back.
+  /**
+   * Draw a native Alt1 overlay notification near the current mouse position.
+   * Falls back silently if any overlay API is unavailable.
+   */
+  function showAlt1Overlay(det) {
     try {
-      statusEl.textContent = "Select chat region (drag a rectangle).";
-      const rect = await selectRect();
-      if (!rect) {
-        statusEl.textContent = "Calibration cancelled.";
-        return;
+      // Decode packed mouse position: high 16 bits = x, low 16 bits = y.
+      // Returns -1 when the mouse is not over the RS3 window.
+      var mp = alt1.mousePosition;
+      var ox, oy;
+      if (mp === -1) {
+        // Centre of the RS3 window as fallback
+        ox = Math.max(4, ((alt1.rsWidth / 2) | 0) - 110);
+        oy = 40;
+      } else {
+        ox = (mp >>> 16) + 20;
+        oy = ((mp & 0xFFFF) - 64) | 0;
       }
-      state.chatRect = rect;
-      saveState(state);
-      statusEl.textContent = `Chat area saved: x=${rect.x}, y=${rect.y}, w=${rect.w}, h=${rect.h}`;
+      // Clamp so the box stays inside the RS3 window
+      ox = Math.max(4, Math.min(ox, alt1.rsWidth - 224));
+      oy = Math.max(4, Math.min(oy, alt1.rsHeight - 58));
+
+      var isRed  = det.type === "vengeful";
+      var accent = isRed ? A1lib.mixColor(255, 90, 90) : A1lib.mixColor(57, 210, 106);
+      var bg     = A1lib.mixColor(14, 17, 22, 220);
+      var fg     = A1lib.mixColor(231, 224, 207);
+      var ms     = 4000;
+
+      alt1.overLayClearGroup(OVERLAY_GROUP);
+      alt1.overLaySetGroup(OVERLAY_GROUP);
+      // Dark background panel
+      alt1.overLayRect(bg, ox, oy, 220, 52, ms, 0);
+      // Accent top strip (2 px filled rect)
+      alt1.overLayRect(accent, ox, oy, 220, 2, ms, 0);
+      // Title: "<TYPE> SOUL DETECTED"
+      alt1.overLayText(det.type.toUpperCase() + " SOUL DETECTED", accent, 13, ox + 6, oy + 17, ms);
+      // Message (truncated to fit the box width)
+      var msg = det.message.length > 47 ? det.message.slice(0, 44) + "..." : det.message;
+      alt1.overLayText(msg, fg, 11, ox + 6, oy + 36, ms);
+      alt1.overLayFreezeGroup(OVERLAY_GROUP);
     } catch (e) {
-      console.error(e);
-      statusEl.textContent = "Calibration failed. (Your Alt1 may not support selection in this template.)";
+      console.warn("[SoulTracker] overlay error:", e);
+    }
+  }
+  btnRefresh.addEventListener("click", () => {
+    if (!inAlt1) {
+      statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
+      return;
+    }
+    if (!hasPixelPermission) {
+      const configUrl =
+        window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
+      const installUrl = "alt1://addapp/" + configUrl;
+      statusEl.innerHTML =
+        "Pixel permission not granted \u2013 the app must be " +
+        '<a href="' + installUrl + '" style="color:#57d26a">installed in Alt1</a>' +
+        " (not just opened in the browser). Reopen it from your Apps panel after installing.";
+      return;
+    }
+    if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
+      statusEl.textContent = "Chat reader library failed to load \u2013 try refreshing the app.";
+      return;
+    }
+    statusEl.textContent = "Scanning for chatbox\u2026";
+    window.SoulChatReader.reset();
+    let found;
+    try {
+      found = window.SoulChatReader.find();
+    } catch (e) {
+      console.error("[SoulTracker] calibration error:", e);
+      statusEl.textContent =
+        "Calibration failed \u2013 pixel capture is not available in this context. " +
+        "Make sure the app is installed in Alt1 (not browsed to directly).";
+      return;
+    }
+    if (found) {
+      statusEl.textContent = "Chatbox found. Watching chat\u2026";
+      // Flash a green outline around the detected chatbox so the user can confirm
+      // the right region was picked up.
+      try {
+        const pos = window.SoulChatReader.getPos();
+        if (pos && pos.x != null) {
+          alt1.overLayClearGroup(CALIBRATE_GROUP);
+          alt1.overLaySetGroup(CALIBRATE_GROUP);
+          alt1.overLayRect(A1lib.mixColor(57, 210, 106), pos.x, pos.y, pos.width, pos.height, 2500, 2);
+          alt1.overLayFreezeGroup(CALIBRATE_GROUP);
+        }
+      } catch (_) {}
+    } else {
+      statusEl.textContent =
+        "Calibration failed \u2013 make sure RS3 is open and the chatbox is visible, then try again.";
     }
   });
 
@@ -85,52 +175,81 @@
     saveState(state);
   }
 
+  // ---- Chatbox finder
+  // Number of ticks between auto-retry attempts while chatbox is not found.
+  const FIND_RETRY_INTERVAL = 10;
+  let findRetries = 0;
+
+  function tryFindChatbox() {
+    if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
+    findRetries = 0;
+    const found = window.SoulChatReader.find();
+    if (found) {
+      statusEl.textContent = "Chatbox found. Watching chat...";
+    } else {
+      statusEl.textContent = "Chatbox not found - make sure RS3 is open and chat is visible. Retrying...";
+    }
+  }
+
   // ---- Main scan loop
   let timer = null;
   function startLoop() {
     if (timer) clearInterval(timer);
-
     const scanMs = clampInt(scanMsEl.value, 100, 2000, 350);
     timer = setInterval(scanTick, scanMs);
   }
 
+  // Kick off: first try finding the chatbox, then start polling.
+  if (inAlt1 && hasPixelPermission && window.SoulChatReader && window.SoulChatReader.isAvailable()) {
+    tryFindChatbox();
+  }
   startLoop();
 
-  async function scanTick() {
-    if (!inAlt1) return;
-    if (!state.chatRect) {
-      statusEl.textContent = "Alt1 detected. Calibrate chat area.";
+  function scanTick() {
+    if (!inAlt1 || !hasPixelPermission) return;
+    const reader = window.SoulChatReader;
+    if (!reader || !reader.isAvailable()) return;
+
+    // If chatbox position is unknown, retry periodically.
+    if (!reader.hasPosition()) {
+      findRetries++;
+      if (findRetries % FIND_RETRY_INTERVAL === 0) {
+        const found = reader.find();
+        if (found) {
+          statusEl.textContent = "Chatbox found. Watching chat...";
+          findRetries = 0;
+        }
+      }
       return;
     }
 
-    // NOTE: Exact OCR API surface varies by Alt1 version.
-    // This is a “template” approach:
-    // 1) capture the chat rectangle bitmap
-    // 2) OCR it
-    //
-    // If your Alt1 build uses a different API, tell me which Alt1 JS libs you’re using
-    // (e.g., a1lib + ChatboxReader), and I’ll adapt the code precisely.
-    let text = "";
+    // Read new chat lines since last tick.
+    let lines;
     try {
-      text = await ocrRect(state.chatRect);
+      lines = reader.read();
     } catch (e) {
-      // Don’t spam status constantly
-      statusEl.textContent = "OCR error (check capture permissions / rectangle).";
+      statusEl.textContent = "Chat read error - click Refresh to retry.";
+      console.error("[SoulTracker] read error:", e);
       return;
     }
 
-    const normalized = normalizeOcr(text);
-    const hash = simpleHash(normalized);
-    if (hash === lastOcrHash) return;
-    lastOcrHash = hash;
+    if (!lines) return;
 
-    const detections = detectSouls(normalized);
-    if (detections.length === 0) return;
+    // Warn if RS3 timestamps appear to be disabled.
+    if (reader.timestampsLikelyDisabled()) {
+      statusEl.textContent =
+        "Enable RS3 chat timestamps (Chat Settings > Timestamp) for best results.";
+    } else if (lines.length > 0) {
+      statusEl.textContent = "Watching chat... (" + new Date().toLocaleTimeString() + ")";
+    }
 
-    statusEl.textContent = `Watching chat… (${new Date().toLocaleTimeString()})`;
-
-    for (const det of detections) {
-      maybeAlert(det);
+    // Check each new line for soul messages.
+    for (const line of lines) {
+      const normalized = normalizeLine(line.text);
+      const detections = detectSouls(normalized);
+      for (const det of detections) {
+        maybeAlert(det);
+      }
     }
   }
 
@@ -149,7 +268,11 @@
     addLogLine(det.type, det.message);
 
     if (enableVisualEl.checked) {
-      showToast(det);
+      if (inAlt1) {
+        showAlt1Overlay(det);
+      } else {
+        showToast(det);
+      }
     }
     if (enableSoundEl.checked) {
       playSound();
@@ -159,15 +282,14 @@
   function addLogLine(type, message) {
     const line = document.createElement("div");
     line.className = "logLine";
-    line.innerHTML = `
-      <div>
-        <span class="logType">${escapeHtml(type.toUpperCase())}</span>
-        <div style="margin-top:4px; color: rgba(231,224,207,.75); font-size: 12px;">
-          ${escapeHtml(message)}
-        </div>
-      </div>
-      <div class="logTime">${new Date().toLocaleTimeString()}</div>
-    `;
+    line.innerHTML =
+      '<div>' +
+        '<span class="logType">' + escapeHtml(type.toUpperCase()) + '</span>' +
+        '<div style="margin-top:4px; color: rgba(231,224,207,.75); font-size: 12px;">' +
+          escapeHtml(message) +
+        '</div>' +
+      '</div>' +
+      '<div class="logTime">' + new Date().toLocaleTimeString() + '</div>';
     logEl.prepend(line);
 
     // keep last ~10
@@ -192,42 +314,39 @@
       audioEl.currentTime = 0;
       const p = audioEl.play();
       if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch {}
+    } catch (_e) { /* audio playback errors are non-fatal */ }
   }
 
   // ---- Detection logic
+
+  /**
+   * Detect soul messages in a single (already-normalized) chat line.
+   * Returns an array of {type, message} objects.
+   */
   function detectSouls(normalizedText) {
-    // normalizedText may include multiple lines merged; we just search substrings.
     if (!normalizedText.includes("soul appears nearby")) return [];
 
-    // Build up possible detections (in case multiple appeared in OCR block)
     const out = [];
-
-    // prefer matching the leading “a <type> soul appears nearby”
     const candidates = [
-      { type: "lost", key: "lost" },
+      { type: "lost",      key: "lost" },
       { type: "mimicking", key: "mimicking" },
-      { type: "unstable", key: "unstable" },
-      { type: "vengeful", key: "vengeful" },
+      { type: "unstable",  key: "unstable" },
+      { type: "vengeful",  key: "vengeful" },
     ];
 
     for (const c of candidates) {
-      if (normalizedText.includes(`a ${c.key} soul appears nearby`)) {
+      // Primary match: "a <type> soul appears nearby"
+      if (normalizedText.includes("a " + c.key + " soul appears nearby")) {
+        out.push({ type: c.type, message: prettyMessage(c.type) });
+        continue;
+      }
+      // Fallback: OCR may drop leading "a " occasionally
+      if (normalizedText.includes(c.key + " soul appears nearby")) {
         out.push({ type: c.type, message: prettyMessage(c.type) });
       }
     }
 
-    // Fallback if OCR misses the "a "
-    if (out.length === 0) {
-      for (const c of candidates) {
-        if (normalizedText.includes(`${c.key} soul appears nearby`)) {
-          out.push({ type: c.type, message: prettyMessage(c.type) });
-        }
-      }
-    }
-
-    // De-duplicate
-    return uniqueBy(out, (x) => x.type);
+    return uniqueBy(out, function(x) { return x.type; });
   }
 
   function prettyMessage(type) {
@@ -237,7 +356,7 @@
       case "mimicking":
         return "A mimicking soul appears nearby. Corner them before they get away.";
       case "unstable":
-        return "A unstable soul appears nearby.";
+        return "An unstable soul appears nearby.";
       case "vengeful":
         return "A vengeful soul appears nearby! Avoid it until it realises you're not the intended target.";
       default:
@@ -245,30 +364,19 @@
     }
   }
 
-  // ---- OCR helpers (template)
-  async function ocrRect(rect) {
-    // This is intentionally abstract because Alt1 OCR APIs differ by setup.
-    // Many plugins use a1lib + OCR libraries (e.g., ChatboxReader).
-    //
-    // If your environment has `alt1.capture` and `alt1.bindReadString`, you’d implement here.
-    // For now, throw so you’re forced to connect the correct OCR library.
-    throw new Error("OCR not wired: tell me which Alt1 JS libs you’re using (a1lib/ChatboxReader/etc.)");
-  }
+  // ---- Utilities
 
-  // ---- Calibration selection (template)
-  function selectRect() {
-    // If your Alt1 exposes an overlay selection helper, wire it here.
-    // Otherwise we can implement a 2-click top-left/bottom-right flow.
-    return Promise.reject(new Error("Rect selection not wired"));
-  }
-
-  // ---- utilities
-  function normalizeOcr(s) {
+  /**
+   * Strip the RS3 timestamp prefix [HH:MM:SS] (if present),
+   * lowercase, and collapse whitespace for reliable substring matching.
+   */
+  function normalizeLine(s) {
     return (s || "")
+      .replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
       .toLowerCase()
       .replace(/\s+/g, " ")
-      .replace(/[“”]/g, '"')
-      .replace(/[’]/g, "'")
+      .replace(/\u201c|\u201d/g, '"')
+      .replace(/\u2019/g, "'")
       .trim();
   }
 
@@ -299,19 +407,10 @@
       .replaceAll("'", "&#039;");
   }
 
-  function simpleHash(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return String(h >>> 0);
-  }
-
   function loadState() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    } catch {
+    } catch (_) {
       return {};
     }
   }
