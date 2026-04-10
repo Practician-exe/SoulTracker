@@ -19,8 +19,23 @@
 
   // ---- Alt1 presence checks
   const inAlt1 = typeof alt1 !== "undefined";
+  // When the app is browsed to in Alt1's built-in browser without being installed,
+  // alt1.permissionPixel is false and pixel capture is blocked by Alt1 itself.
+  const hasPixelPermission = inAlt1 && alt1.permissionPixel === true;
+
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
+  } else if (!hasPixelPermission) {
+    // Build an alt1://addapp/ link from the current page URL so the user can
+    // install the app with one click.
+    const configUrl =
+      window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
+    const installUrl = "alt1://addapp/" + configUrl;
+    statusEl.innerHTML =
+      "This app needs to be <strong>installed</strong> in Alt1 to scan the chatbox. " +
+      '<a href="' + installUrl + '" style="color:#57d26a">Click here to install</a>, ' +
+      "then reopen it from your Apps panel.";
+    btnRefresh.disabled = true;
   } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
     statusEl.textContent = "Chat reader library failed to load.";
   } else {
@@ -91,7 +106,7 @@
     }
   }
   btnRefresh.addEventListener("click", () => {
-    if (!inAlt1 || !window.SoulChatReader) return;
+    if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader) return;
     statusEl.textContent = "Scanning for chatbox...";
     window.SoulChatReader.reset();
     const found = window.SoulChatReader.find();
@@ -139,7 +154,7 @@
   let findRetries = 0;
 
   function tryFindChatbox() {
-    if (!inAlt1 || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
+    if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
     findRetries = 0;
     const found = window.SoulChatReader.find();
     if (found) {
@@ -158,13 +173,13 @@
   }
 
   // Kick off: first try finding the chatbox, then start polling.
-  if (inAlt1 && window.SoulChatReader && window.SoulChatReader.isAvailable()) {
+  if (inAlt1 && hasPixelPermission && window.SoulChatReader && window.SoulChatReader.isAvailable()) {
     tryFindChatbox();
   }
   startLoop();
 
   function scanTick() {
-    if (!inAlt1) return;
+    if (!inAlt1 || !hasPixelPermission) return;
     const reader = window.SoulChatReader;
     if (!reader || !reader.isAvailable()) return;
 
