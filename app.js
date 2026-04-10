@@ -35,6 +35,7 @@
   let messageTemplates = null;
   let templatesReady = false;
   let templateLoadError = null;
+  let alertResetTimer = null;
   const TEMPLATE_MATCH_MAX = 120;
   const TEMPLATE_SCAN_PADDING_X = 24;
   const TEMPLATE_SCAN_PADDING_Y = 10;
@@ -175,9 +176,11 @@
   }
 
   function setAlertPanelIdle() {
+    clearTimeout(alertResetTimer);
+    alertResetTimer = null;
     alertPanelEl.classList.remove("alertPanel--active", "alertPanel--danger");
     alertPanelEl.classList.add("alertPanel--idle");
-    alertTitleEl.textContent = "No soul detected";
+    alertTitleEl.textContent = "No souls detected";
     alertBodyEl.textContent = "Watching chat...";
   }
 
@@ -537,10 +540,15 @@
 
   function showAlertPanel(det) {
     const isRed = det.type === "vengeful";
+    clearTimeout(alertResetTimer);
+    alertResetTimer = null;
     alertPanelEl.classList.remove("alertPanel--idle", "alertPanel--active", "alertPanel--danger");
     alertPanelEl.classList.add(isRed ? "alertPanel--danger" : "alertPanel--active");
     alertTitleEl.textContent = "Soul detected";
     alertBodyEl.textContent = det.message;
+    alertResetTimer = setTimeout(() => {
+      setAlertPanelIdle();
+    }, 10000);
   }
 
   function playSound() {
