@@ -23,6 +23,7 @@
 
   // How many consecutive reads without any timestamp before we warn.
   var TIMESTAMP_WARNING_THRESHOLD = 5;
+  var MAX_PROBE_CANDIDATES = 3;
 
   window.SoulChatReader = {
     /** @type {InstanceType<ChatBoxReader> | null} */
@@ -61,12 +62,119 @@
       // Do NOT catch here – let the caller handle errors so it can show the
       // correct message (e.g. "pixel capture not available – install the app").
       var result = this._reader.find();
+      if (result && result.boxes && result.boxes.length > 1) {
+        var best = this._pickBestMainbox(result);
+        if (best) {
+          result.mainbox = best;
+          this._reader.pos.mainbox = best;
+        }
+      }
       this._found = result !== null && result !== undefined;
       if (this._found) {
         // Reset streak counter on successful find
         this._noTimestampStreak = 0;
       }
       return this._found;
+    },
+
+    _pickBestMainbox: function (pos) {
+      if (!pos || !pos.boxes || !pos.boxes.length) return null;
+
+      var ranked = pos.boxes
+        .map(function (box, index) {
+          return {
+            box: box,
+            score: this._scoreBoxHeuristically(box, index),
+          };
+        }, this)
+        .sort(function (a, b) { return b.score - a.score; });
+
+      var best = null;
+      var bestScore = -Infinity;
+      var limit = Math.min(ranked.length, MAX_PROBE_CANDIDATES);
+
+      for (var i = 0; i < limit; i++) {
+        var candidate = ranked[i];
+        var totalScore = candidate.score + this._probeBox(candidate.box);
+        if (totalScore > bestScore) {
+          bestScore = totalScore;
+          best = candidate.box;
+        }
+      }
+
+      return best || pos.mainbox || ranked[0].box;
+    },
+
+    _scoreBoxHeuristically: function (box, index) {
+      if (!box || !box.rect) return -Infinity;
+
+      var rect = box.rect;
+      var width = rect.width || 0;
+      var height = rect.height || 0;
+      var area = width * height;
+      var y = rect.y || 0;
+      var score = 0;
+
+      if (box.type === "main") score += 1000000;
+      if (box.leftfound) score += 150000;
+      if (box.timestamp) score += 50000;
+
+      score += Math.min(area, 250000);
+      score += width * 250;
+      score += height * 50;
+      score += y * 25;
+      score -= index;
+      return score;
+    },
+
+    _probeBox: function (box) {
+      if (!this._reader || !this._reader.pos || !box) return -Infinity;
+
+      var reader = this._reader;
+      var snapshot = {
+        pos: reader.pos,
+        overlaplines: reader.overlaplines ? reader.overlaplines.slice() : [],
+        lastTimestamp: reader.lastTimestamp,
+        lastTimestampUpdate: reader.lastTimestampUpdate,
+        addedLastread: reader.addedLastread,
+        font: reader.font,
+        lastReadBuffer: reader.lastReadBuffer,
+      };
+
+      try {
+        reader.pos.mainbox = box;
+        reader.overlaplines = [];
+        reader.lastTimestamp = -1;
+        reader.lastTimestampUpdate = 0;
+        reader.addedLastread = false;
+        reader.font = null;
+
+        var lines = reader.read() || [];
+        var score = 0;
+
+        for (var i = 0; i < lines.length; i++) {
+          var text = lines[i] && lines[i].text ? lines[i].text.trim() : "";
+          if (!text) continue;
+
+          if (/^\[\d{2}:\d{2}:\d{2}\]/.test(text)) score += 400;
+          if (/[a-z]{3,}/i.test(text)) score += 120;
+
+          var stripped = text.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
+          score += Math.min(stripped.length, 120);
+        }
+
+        return score;
+      } catch (_e) {
+        return -Infinity;
+      } finally {
+        reader.pos = snapshot.pos;
+        reader.overlaplines = snapshot.overlaplines;
+        reader.lastTimestamp = snapshot.lastTimestamp;
+        reader.lastTimestampUpdate = snapshot.lastTimestampUpdate;
+        reader.addedLastread = snapshot.addedLastread;
+        reader.font = snapshot.font;
+        reader.lastReadBuffer = snapshot.lastReadBuffer;
+      }
     },
 
     /**
