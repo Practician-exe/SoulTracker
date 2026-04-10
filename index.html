@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RS3 Soul Tracker</title>
+    <link rel="stylesheet" href="theme.css" />
+  </head>
+  <body>
+    <div class="panel">
+      <div class="panel__header">
+        <div class="panel__title">Soul Tracker</div>
+        <div class="panel__subtitle" id="status">Loading…</div>
+      </div>
+
+      <div class="panel__section">
+        <div class="row">
+          <button id="btnCalibrate" class="btn btn--primary">Calibrate chat area</button>
+          <button id="btnTest" class="btn">Test alert</button>
+        </div>
+        <div class="hint">
+          Tip: open RS3 with the chatbox visible, then click “Calibrate chat area” and select the region containing the newest chat lines.
+        </div>
+      </div>
+
+      <div class="panel__section">
+        <div class="row row--split">
+          <label class="field">
+            <div class="field__label">Cooldown (seconds)</div>
+            <input id="cooldownSec" class="input" type="number" min="1" max="600" value="30" />
+          </label>
+
+          <label class="field">
+            <div class="field__label">Scan interval (ms)</div>
+            <input id="scanMs" class="input" type="number" min="100" max="2000" value="350" />
+          </label>
+        </div>
+
+        <div class="row row--split">
+          <label class="check">
+            <input type="checkbox" id="enableSound" checked />
+            <span>Sound</span>
+          </label>
+
+          <label class="check">
+            <input type="checkbox" id="enableVisual" checked />
+            <span>Visual toast</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="panel__section">
+        <div class="sectionTitle">Detected (latest)</div>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" aria-live="polite" aria-atomic="true">
+      <div class="toast__inner">
+        <div class="toast__title" id="toastTitle">Soul detected</div>
+        <div class="toast__body" id="toastBody"></div>
+      </div>
+    </div>
+
+    <audio id="alertAudio" preload="auto">
+      <source src="./soul_detected_check_your_rs.mp3" type="audio/mpeg" />
+    </audio>
+
+    <script src="app.js"></script>
+  </body>
+</html>
