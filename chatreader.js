@@ -1,49 +1,31 @@
 /**
  * chatreader.js
  *
- * Thin wrapper around the alt1 ChatBoxReader (from lib/a1lib-chatbox.js).
+ * Thin wrapper around the Alt1 ChatBoxReader (from lib/a1lib-chatbox.js).
  * Exposes window.SoulChatReader with find/read/hasPosition helpers
  * used by app.js.
- *
- * Loading order requirement (index.html):
- *   1. lib/a1lib-base.js    → sets globalThis.A1lib
- *   2. lib/a1lib-ocr.js     → sets globalThis.OCR
- *   3. lib/a1lib-chatbox.js → sets globalThis.Chatbox
- *   4. chatreader.js        (this file)
- *   5. app.js
  */
 (function () {
   "use strict";
 
-  // The UMD chatbox bundle exports the class as Chatbox.default
   var ChatBoxReader =
     typeof Chatbox !== "undefined" && Chatbox && Chatbox.default
       ? Chatbox.default
       : null;
 
-  // How many consecutive reads without any timestamp before we warn.
   var TIMESTAMP_WARNING_THRESHOLD = 5;
   var MAX_PROBE_CANDIDATES = 3;
 
   window.SoulChatReader = {
-    /** @type {InstanceType<ChatBoxReader> | null} */
     _reader: null,
-    /** Number of consecutive reads where no line had a timestamp. */
     _noTimestampStreak: 0,
-    /** true once the chatbox position has been found */
     _found: false,
+    _manualRect: null,
 
-    /**
-     * Returns true if the ChatBoxReader bundle loaded successfully.
-     */
     isAvailable: function () {
       return ChatBoxReader !== null;
     },
 
-    /**
-     * Lazily creates the ChatBoxReader instance.
-     * Safe to call multiple times.
-     */
     _ensureReader: function () {
       if (!ChatBoxReader) return false;
       if (!this._reader) {
@@ -52,15 +34,30 @@
       return true;
     },
 
-    /**
-     * Scan the full RS3 window to locate the chatbox.
-     * Must be called at least once (or whenever the chatbox moves / is not found).
-     * Returns true if the chatbox was found.
-     */
+    _makeManualPos: function (rect) {
+      return {
+        mainbox: {
+          rect: rect,
+          leftfound: true,
+          line0x: 0,
+          line0y: rect.height - 12,
+          timestamp: false,
+          type: "main",
+        },
+        boxes: [],
+      };
+    },
+
     find: function () {
       if (!this._ensureReader()) return false;
-      // Do NOT catch here – let the caller handle errors so it can show the
-      // correct message (e.g. "pixel capture not available – install the app").
+
+      if (this._manualRect) {
+        this._reader.pos = this._makeManualPos(this._manualRect);
+        this._found = true;
+        this._noTimestampStreak = 0;
+        return true;
+      }
+
       var result = this._reader.find();
       if (result && result.boxes && result.boxes.length > 1) {
         var best = this._pickBestMainbox(result);
@@ -69,9 +66,9 @@
           this._reader.pos.mainbox = best;
         }
       }
+
       this._found = result !== null && result !== undefined;
       if (this._found) {
-        // Reset streak counter on successful find
         this._noTimestampStreak = 0;
       }
       return this._found;
@@ -177,29 +174,49 @@
       }
     },
 
-    /**
-     * Returns true if the chatbox position is currently known.
-     */
     hasPosition: function () {
       return this._found && !!(this._reader && this._reader.pos);
     },
 
-    /**
-     * Read new chat lines since the last read.
-     * Returns an array of {text: string} objects, or null on error.
-     * Each text entry may look like:
-     *   "[12:34:56] A lost soul appears nearby."
-     *
-     * Also updates internal timestamp-streak counter so callers can
-     * detect when RS3 timestamps are disabled.
-     */
+    hasManualRect: function () {
+      return !!this._manualRect;
+    },
+
+    setManualRect: function (rect) {
+      if (!this._ensureReader()) return false;
+      if (!rect || rect.x == null || rect.y == null || rect.width == null || rect.height == null) {
+        return false;
+      }
+
+      this._manualRect = {
+        x: rect.x | 0,
+        y: rect.y | 0,
+        width: rect.width | 0,
+        height: rect.height | 0,
+      };
+
+      this._reader.pos = this._makeManualPos(this._manualRect);
+      this._reader.overlaplines = [];
+      this._reader.lastTimestamp = -1;
+      this._reader.lastTimestampUpdate = 0;
+      this._reader.addedLastread = false;
+      this._reader.font = null;
+      this._found = true;
+      this._noTimestampStreak = 0;
+      return true;
+    },
+
+    clearManualRect: function () {
+      this._manualRect = null;
+      this.reset();
+    },
+
     read: function () {
       if (!this._reader || !this._reader.pos) return null;
       try {
         var lines = this._reader.read();
         if (!lines) return null;
 
-        // Track whether we're seeing timestamps
         var sawTimestamp = false;
         for (var i = 0; i < lines.length; i++) {
           if (/^\[\d{2}:\d{2}:\d{2}\]/.test(lines[i].text)) {
@@ -223,42 +240,31 @@
       }
     },
 
-    /**
-     * Returns true if the recent reads suggest timestamps are disabled in RS3.
-     */
     timestampsLikelyDisabled: function () {
       return this._noTimestampStreak >= TIMESTAMP_WARNING_THRESHOLD;
     },
 
-    /**
-     * Returns the bounding rect of the main chatbox after a successful find(),
-     * as a plain {x, y, width, height} object suitable for drawing an overlay.
-     * Returns null if no position is known.
-     *
-     * The underlying ChatBoxReader stores pos as { mainbox: { rect: Rect, ... }, boxes: [] },
-     * so we unwrap to mainbox.rect here.
-     */
     getPos: function () {
+      if (this._manualRect) return this._manualRect;
       if (!this._reader || !this._reader.pos) return null;
       var p = this._reader.pos;
       if (p.mainbox && p.mainbox.rect) {
         return p.mainbox.rect;
       }
-      // Fallback: if the library ever returns a flat rect directly
-      return (typeof p === "object" && p.x != null) ? p : null;
+      return typeof p === "object" && p.x != null ? p : null;
     },
 
-    /**
-     * Reset internal state (useful when refreshing detection).
-     */
     reset: function () {
       this._found = false;
       this._noTimestampStreak = 0;
       if (this._reader) {
-        this._reader.pos = null;
+        this._reader.pos = this._manualRect ? this._makeManualPos(this._manualRect) : null;
         this._reader.overlaplines = [];
         this._reader.lastTimestamp = -1;
         this._reader.font = null;
+      }
+      if (this._manualRect && this._reader) {
+        this._found = true;
       }
     },
   };

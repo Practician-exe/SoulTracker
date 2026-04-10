@@ -7,6 +7,8 @@
   const audioEl = document.getElementById("alertAudio");
 
   const btnRefresh = document.getElementById("btnRefresh");
+  const btnManual = document.getElementById("btnManual");
+  const btnClearManual = document.getElementById("btnClearManual");
   const btnTest = document.getElementById("btnTest");
 
   const cooldownSecEl = document.getElementById("cooldownSec");
@@ -108,6 +110,8 @@
   // Group name used for our notifications so we can clear them before redrawing.
   var OVERLAY_GROUP = "st_soul";
   var CALIBRATE_GROUP = "st_cal";
+  var MANUAL_GROUP = "st_manual";
+  var manualPickTimer = null;
 
   /**
    * Draw a native Alt1 overlay notification near the current mouse position.
@@ -153,6 +157,132 @@
       console.warn("[SoulTracker] overlay error:", e);
     }
   }
+
+  function getRsMousePos() {
+    if (!inAlt1) return null;
+    var mp = alt1.mousePosition;
+    if (mp === -1) return null;
+    return { x: mp >>> 16, y: mp & 0xFFFF };
+  }
+
+  function showRectOverlay(rect, color, ms, group) {
+    try {
+      alt1.overLayClearGroup(group);
+      alt1.overLaySetGroup(group);
+      alt1.overLayRect(color, rect.x, rect.y, rect.width, rect.height, ms, 2);
+      alt1.overLayFreezeGroup(group);
+    } catch (_e) {}
+  }
+
+  function clearManualOverlay() {
+    try {
+      alt1.overLayClearGroup(MANUAL_GROUP);
+    } catch (_e) {}
+  }
+
+  function setButtonsDisabled(disabled) {
+    btnRefresh.disabled = disabled;
+    btnManual.disabled = disabled;
+    btnClearManual.disabled = disabled;
+    btnTest.disabled = disabled;
+  }
+
+  function normalizeRect(a, b) {
+    var left = Math.min(a.x, b.x);
+    var top = Math.min(a.y, b.y);
+    var right = Math.max(a.x, b.x);
+    var bottom = Math.max(a.y, b.y);
+    return {
+      x: left,
+      y: top,
+      width: right - left,
+      height: bottom - top,
+    };
+  }
+
+  function persistManualRect(rect) {
+    if (rect) {
+      state.manualRect = rect;
+    } else {
+      delete state.manualRect;
+    }
+    saveState(state);
+  }
+
+  function applyManualRect(rect) {
+    if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) return false;
+    var ok = window.SoulChatReader.setManualRect(rect);
+    if (!ok) return false;
+    persistManualRect(rect);
+    showRectOverlay(rect, A1lib.mixColor(57, 210, 106), 3500, MANUAL_GROUP);
+    statusEl.textContent = "Manual chat area saved. Watching chat...";
+    return true;
+  }
+
+  function captureMouseAfterCountdown(label, seconds, done) {
+    clearTimeout(manualPickTimer);
+    var remaining = seconds;
+
+    function tick() {
+      statusEl.textContent =
+        "Manual select: hover " + label + " over the visible chat text area in RS3. Capturing in " + remaining + "...";
+
+      if (remaining <= 0) {
+        var pos = getRsMousePos();
+        done(pos);
+        return;
+      }
+
+      remaining--;
+      manualPickTimer = setTimeout(tick, 1000);
+    }
+
+    tick();
+  }
+
+  function startManualSelection() {
+    if (!inAlt1) {
+      statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
+      return;
+    }
+    if (!hasPixelPermission) {
+      setStatusWithLink(
+        "Pixel permission not granted – the app must be ",
+        "installed in Alt1",
+        " (not just opened in the browser). Reopen it from your Apps panel after installing."
+      );
+      return;
+    }
+
+    setButtonsDisabled(true);
+    clearManualOverlay();
+
+    captureMouseAfterCountdown("TOP-LEFT", 3, function (topLeft) {
+      if (!topLeft) {
+        setButtonsDisabled(false);
+        statusEl.textContent = "Manual select failed: keep your mouse over the RS3 window during capture.";
+        return;
+      }
+
+      captureMouseAfterCountdown("BOTTOM-RIGHT", 3, function (bottomRight) {
+        setButtonsDisabled(false);
+        if (!bottomRight) {
+          statusEl.textContent = "Manual select failed: keep your mouse over the RS3 window during capture.";
+          return;
+        }
+
+        var rect = normalizeRect(topLeft, bottomRight);
+        if (rect.width < 120 || rect.height < 40) {
+          statusEl.textContent = "Manual select failed: the selected area was too small. Try again.";
+          return;
+        }
+
+        if (!applyManualRect(rect)) {
+          statusEl.textContent = "Manual select failed: chat reader is not available.";
+        }
+      });
+    });
+  }
   btnRefresh.addEventListener("click", () => {
     if (!inAlt1) {
       statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
@@ -171,6 +301,11 @@
       return;
     }
     statusEl.textContent = "Scanning for chatbox\u2026";
+    if (window.SoulChatReader && window.SoulChatReader.hasManualRect()) {
+      window.SoulChatReader.clearManualRect();
+      persistManualRect(null);
+      clearManualOverlay();
+    }
     window.SoulChatReader.reset();
     let found;
     try {
@@ -197,6 +332,20 @@
       statusEl.textContent =
         "Calibration failed \u2013 make sure RS3 is open and the chatbox is visible, then try again.";
     }
+  });
+
+  btnManual.addEventListener("click", () => {
+    startManualSelection();
+  });
+
+  btnClearManual.addEventListener("click", () => {
+    clearTimeout(manualPickTimer);
+    if (window.SoulChatReader) {
+      window.SoulChatReader.clearManualRect();
+    }
+    persistManualRect(null);
+    clearManualOverlay();
+    statusEl.textContent = "Manual chat area cleared. Click Auto detect or Manual select.";
   });
 
   btnTest.addEventListener("click", () => {
@@ -226,6 +375,10 @@
 
   function tryFindChatbox() {
     if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
+    if (window.SoulChatReader.hasManualRect()) {
+      statusEl.textContent = "Using saved manual chat area. Watching chat...";
+      return;
+    }
     findRetries = 0;
     let found;
     try {
@@ -252,7 +405,15 @@
 
   // Kick off: first try finding the chatbox, then start polling.
   if (inAlt1 && hasPixelPermission && window.SoulChatReader && window.SoulChatReader.isAvailable()) {
-    tryFindChatbox();
+    if (state.manualRect && state.manualRect.x != null) {
+      if (applyManualRect(state.manualRect)) {
+        statusEl.textContent = "Using saved manual chat area. Watching chat...";
+      } else {
+        tryFindChatbox();
+      }
+    } else {
+      tryFindChatbox();
+    }
   }
   startLoop();
 
