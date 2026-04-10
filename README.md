@@ -5,8 +5,10 @@ Alt1 app for RuneScape 3 that watches a manually selected chat area and alerts w
 ## Quick Start
 
 1. Install [Alt1 Toolkit](https://runeapps.org/alt1).
-2. Add this app in Alt1.
-> alt1://addapp/https://practician-exe.github.io/SoulTracker/appconfig.json
+2. Copy & Paste the following to add this app in Alt 1.
+```
+alt1://addapp/https://practician-exe.github.io/SoulTracker/appconfig.json
+```
 4. Open RS3 and make sure the relevant chat is visible.
 5. Click `Drag select` and draw a box around the visible chat text area.
 6. Leave the app open while playing.
@@ -63,5 +65,9 @@ lib/a1lib-chatbox.js            Alt1 chatbox reader library
 
 ## Notes
 
-- This app is built for Alt1 and RS3, not RuneLite.
+- This app is built for Alt 1
 - If detection stops working after moving your interface, run `Drag select` again.
+
+## Credit
+
+- Full credit to Codex & GitHub. This was made almost entirely using AI after having an idea. - Husbulla
