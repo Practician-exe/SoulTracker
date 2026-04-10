@@ -45,6 +45,30 @@
     if (suffix) statusEl.appendChild(document.createTextNode(suffix));
   }
 
+  function getAlt1CaptureIssue(error) {
+    const msg = error && error.message ? String(error.message) : "";
+
+    if (inAlt1 && (alt1.rsWidth <= 0 || alt1.rsHeight <= 0)) {
+      return (
+        "Alt1 can't access the RS3 game window right now. Open RS3, keep it visible on-screen, and try again."
+      );
+    }
+
+    if (/capturehold failed/i.test(msg)) {
+      return (
+        "Alt1 detected the app, but couldn't bind the RS3 window for pixel capture. Make sure RS3 is open and visible, then try again."
+      );
+    }
+
+    if (/outside of Alt1/i.test(msg)) {
+      return "Open this app from inside Alt1 Toolkit.";
+    }
+
+    return (
+      "Alt1 couldn't capture the RS3 window. Make sure RS3 is open and visible, then try again."
+    );
+  }
+
   // ---- Alt1 presence checks
   const inAlt1 = typeof alt1 !== "undefined";
   // When the app is browsed to in Alt1's built-in browser without being installed,
@@ -153,12 +177,7 @@
       found = window.SoulChatReader.find();
     } catch (e) {
       console.error("[SoulTracker] calibration error:", e);
-      setStatusWithLink(
-        "Calibration failed \u2013 pixel capture is not available. " +
-        "The app must be installed in Alt1 (not just opened in the browser). ",
-        "Click here to install",
-        ", then reopen it from your Apps panel."
-      );
+      statusEl.textContent = getAlt1CaptureIssue(e);
       return;
     }
     if (found) {
@@ -213,11 +232,7 @@
       found = window.SoulChatReader.find();
     } catch (e) {
       console.error("[SoulTracker] auto-find error:", e);
-      setStatusWithLink(
-        "Pixel capture failed \u2013 the app may not be properly installed. ",
-        "Reinstall here",
-        " and reopen from your Apps panel."
-      );
+      statusEl.textContent = getAlt1CaptureIssue(e);
       return;
     }
     if (found) {
@@ -255,11 +270,7 @@
           found = reader.find();
         } catch (e) {
           console.error("[SoulTracker] find error in scan loop:", e);
-          setStatusWithLink(
-            "Pixel capture error \u2013 the app may need to be reinstalled. ",
-            "Reinstall here",
-            " and reopen from your Apps panel, or click Refresh to retry."
-          );
+          statusEl.textContent = getAlt1CaptureIssue(e);
           return;
         }
         if (found) {
