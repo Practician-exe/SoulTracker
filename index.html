@@ -10,16 +10,17 @@
     <div class="panel">
       <div class="panel__header">
         <div class="panel__title">Soul Tracker</div>
-        <div class="panel__subtitle" id="status">Loading…</div>
+        <div class="panel__subtitle" id="status">Loading&hellip;</div>
       </div>
 
       <div class="panel__section">
         <div class="row">
-          <button id="btnCalibrate" class="btn btn--primary">Calibrate chat area</button>
+          <button id="btnRefresh" class="btn btn--primary">Refresh chat detection</button>
           <button id="btnTest" class="btn">Test alert</button>
         </div>
         <div class="hint">
-          Tip: open RS3 with the chatbox visible, then click “Calibrate chat area” and select the region containing the newest chat lines.
+          Chatbox is auto-detected &mdash; no calibration needed.
+          Enable <strong>timestamps</strong> in RS3 Chat Settings for reliable deduplication.
         </div>
       </div>
 
@@ -36,7 +37,7 @@
           </label>
         </div>
 
-        <div class="row row--split">
+        <div class="row row--split" style="margin-top:10px">
           <label class="check">
             <input type="checkbox" id="enableSound" checked />
             <span>Sound</span>
@@ -66,6 +67,18 @@
       <source src="./soul_detected_check_your_rs.mp3" type="audio/mpeg" />
     </audio>
 
+    <!--
+      Load order matters:
+        1. a1lib-base  -> sets globalThis.A1lib
+        2. a1lib-ocr   -> depends on A1lib, sets globalThis.OCR
+        3. a1lib-chatbox -> depends on A1lib + OCR, sets globalThis.Chatbox
+        4. chatreader  -> wraps Chatbox.default as window.SoulChatReader
+        5. app         -> main plugin logic
+    -->
+    <script src="lib/a1lib-base.js"></script>
+    <script src="lib/a1lib-ocr.js"></script>
+    <script src="lib/a1lib-chatbox.js"></script>
+    <script src="chatreader.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

@@ -6,7 +6,7 @@
   const toastBodyEl = document.getElementById("toastBody");
   const audioEl = document.getElementById("alertAudio");
 
-  const btnCalibrate = document.getElementById("btnCalibrate");
+  const btnRefresh = document.getElementById("btnRefresh");
   const btnTest = document.getElementById("btnTest");
 
   const cooldownSecEl = document.getElementById("cooldownSec");
@@ -21,8 +21,10 @@
   const inAlt1 = typeof alt1 !== "undefined";
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
+  } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
+    statusEl.textContent = "Chat reader library failed to load.";
   } else {
-    statusEl.textContent = "Alt1 detected. Calibrate chat area if needed.";
+    statusEl.textContent = "Alt1 detected. Locating chatbox...";
   }
 
   // ---- Cooldown bookkeeping: per soul type
@@ -33,36 +35,18 @@
     vengeful: 0,
   };
 
-  // Also dedupe on exact OCR text to reduce repeats from the same frame
-  let lastOcrHash = "";
-
   // ---- UI init from saved state
   if (typeof state.cooldownSec === "number") cooldownSecEl.value = String(state.cooldownSec);
   if (typeof state.scanMs === "number") scanMsEl.value = String(state.scanMs);
   if (typeof state.enableSound === "boolean") enableSoundEl.checked = state.enableSound;
   if (typeof state.enableVisual === "boolean") enableVisualEl.checked = state.enableVisual;
 
-  btnCalibrate.addEventListener("click", async () => {
-    if (!inAlt1) return;
-
-    // Alt1 has built-in region selection helpers in some setups.
-    // If your Alt1 build doesn’t expose a helper, we can do manual entry instead.
-    //
-    // This tries to use alt1.overLayRect selection if available; otherwise falls back.
-    try {
-      statusEl.textContent = "Select chat region (drag a rectangle).";
-      const rect = await selectRect();
-      if (!rect) {
-        statusEl.textContent = "Calibration cancelled.";
-        return;
-      }
-      state.chatRect = rect;
-      saveState(state);
-      statusEl.textContent = `Chat area saved: x=${rect.x}, y=${rect.y}, w=${rect.w}, h=${rect.h}`;
-    } catch (e) {
-      console.error(e);
-      statusEl.textContent = "Calibration failed. (Your Alt1 may not support selection in this template.)";
-    }
+  // ---- Button handlers
+  btnRefresh.addEventListener("click", () => {
+    if (!inAlt1 || !window.SoulChatReader) return;
+    statusEl.textContent = "Re-scanning for chatbox...";
+    window.SoulChatReader.reset();
+    tryFindChatbox();
   });
 
   btnTest.addEventListener("click", () => {
@@ -85,52 +69,81 @@
     saveState(state);
   }
 
+  // ---- Chatbox finder
+  // Number of ticks between auto-retry attempts while chatbox is not found.
+  const FIND_RETRY_INTERVAL = 10;
+  let findRetries = 0;
+
+  function tryFindChatbox() {
+    if (!inAlt1 || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
+    findRetries = 0;
+    const found = window.SoulChatReader.find();
+    if (found) {
+      statusEl.textContent = "Chatbox found. Watching chat...";
+    } else {
+      statusEl.textContent = "Chatbox not found - make sure RS3 is open and chat is visible. Retrying...";
+    }
+  }
+
   // ---- Main scan loop
   let timer = null;
   function startLoop() {
     if (timer) clearInterval(timer);
-
     const scanMs = clampInt(scanMsEl.value, 100, 2000, 350);
     timer = setInterval(scanTick, scanMs);
   }
 
+  // Kick off: first try finding the chatbox, then start polling.
+  if (inAlt1 && window.SoulChatReader && window.SoulChatReader.isAvailable()) {
+    tryFindChatbox();
+  }
   startLoop();
 
-  async function scanTick() {
+  function scanTick() {
     if (!inAlt1) return;
-    if (!state.chatRect) {
-      statusEl.textContent = "Alt1 detected. Calibrate chat area.";
+    const reader = window.SoulChatReader;
+    if (!reader || !reader.isAvailable()) return;
+
+    // If chatbox position is unknown, retry periodically.
+    if (!reader.hasPosition()) {
+      findRetries++;
+      if (findRetries % FIND_RETRY_INTERVAL === 0) {
+        const found = reader.find();
+        if (found) {
+          statusEl.textContent = "Chatbox found. Watching chat...";
+          findRetries = 0;
+        }
+      }
       return;
     }
 
-    // NOTE: Exact OCR API surface varies by Alt1 version.
-    // This is a “template” approach:
-    // 1) capture the chat rectangle bitmap
-    // 2) OCR it
-    //
-    // If your Alt1 build uses a different API, tell me which Alt1 JS libs you’re using
-    // (e.g., a1lib + ChatboxReader), and I’ll adapt the code precisely.
-    let text = "";
+    // Read new chat lines since last tick.
+    let lines;
     try {
-      text = await ocrRect(state.chatRect);
+      lines = reader.read();
     } catch (e) {
-      // Don’t spam status constantly
-      statusEl.textContent = "OCR error (check capture permissions / rectangle).";
+      statusEl.textContent = "Chat read error - click Refresh to retry.";
+      console.error("[SoulTracker] read error:", e);
       return;
     }
 
-    const normalized = normalizeOcr(text);
-    const hash = simpleHash(normalized);
-    if (hash === lastOcrHash) return;
-    lastOcrHash = hash;
+    if (!lines) return;
 
-    const detections = detectSouls(normalized);
-    if (detections.length === 0) return;
+    // Warn if RS3 timestamps appear to be disabled.
+    if (reader.timestampsLikelyDisabled()) {
+      statusEl.textContent =
+        "Enable RS3 chat timestamps (Chat Settings > Timestamp) for best results.";
+    } else if (lines.length > 0) {
+      statusEl.textContent = "Watching chat... (" + new Date().toLocaleTimeString() + ")";
+    }
 
-    statusEl.textContent = `Watching chat… (${new Date().toLocaleTimeString()})`;
-
-    for (const det of detections) {
-      maybeAlert(det);
+    // Check each new line for soul messages.
+    for (const line of lines) {
+      const normalized = normalizeLine(line.text);
+      const detections = detectSouls(normalized);
+      for (const det of detections) {
+        maybeAlert(det);
+      }
     }
   }
 
@@ -159,15 +172,14 @@
   function addLogLine(type, message) {
     const line = document.createElement("div");
     line.className = "logLine";
-    line.innerHTML = `
-      <div>
-        <span class="logType">${escapeHtml(type.toUpperCase())}</span>
-        <div style="margin-top:4px; color: rgba(231,224,207,.75); font-size: 12px;">
-          ${escapeHtml(message)}
-        </div>
-      </div>
-      <div class="logTime">${new Date().toLocaleTimeString()}</div>
-    `;
+    line.innerHTML =
+      '<div>' +
+        '<span class="logType">' + escapeHtml(type.toUpperCase()) + '</span>' +
+        '<div style="margin-top:4px; color: rgba(231,224,207,.75); font-size: 12px;">' +
+          escapeHtml(message) +
+        '</div>' +
+      '</div>' +
+      '<div class="logTime">' + new Date().toLocaleTimeString() + '</div>';
     logEl.prepend(line);
 
     // keep last ~10
@@ -192,42 +204,39 @@
       audioEl.currentTime = 0;
       const p = audioEl.play();
       if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch {}
+    } catch (_) {}
   }
 
   // ---- Detection logic
+
+  /**
+   * Detect soul messages in a single (already-normalized) chat line.
+   * Returns an array of {type, message} objects.
+   */
   function detectSouls(normalizedText) {
-    // normalizedText may include multiple lines merged; we just search substrings.
     if (!normalizedText.includes("soul appears nearby")) return [];
 
-    // Build up possible detections (in case multiple appeared in OCR block)
     const out = [];
-
-    // prefer matching the leading “a <type> soul appears nearby”
     const candidates = [
-      { type: "lost", key: "lost" },
+      { type: "lost",      key: "lost" },
       { type: "mimicking", key: "mimicking" },
-      { type: "unstable", key: "unstable" },
-      { type: "vengeful", key: "vengeful" },
+      { type: "unstable",  key: "unstable" },
+      { type: "vengeful",  key: "vengeful" },
     ];
 
     for (const c of candidates) {
-      if (normalizedText.includes(`a ${c.key} soul appears nearby`)) {
+      // Primary match: "a <type> soul appears nearby"
+      if (normalizedText.includes("a " + c.key + " soul appears nearby")) {
+        out.push({ type: c.type, message: prettyMessage(c.type) });
+        continue;
+      }
+      // Fallback: OCR may drop leading "a " occasionally
+      if (normalizedText.includes(c.key + " soul appears nearby")) {
         out.push({ type: c.type, message: prettyMessage(c.type) });
       }
     }
 
-    // Fallback if OCR misses the "a "
-    if (out.length === 0) {
-      for (const c of candidates) {
-        if (normalizedText.includes(`${c.key} soul appears nearby`)) {
-          out.push({ type: c.type, message: prettyMessage(c.type) });
-        }
-      }
-    }
-
-    // De-duplicate
-    return uniqueBy(out, (x) => x.type);
+    return uniqueBy(out, function(x) { return x.type; });
   }
 
   function prettyMessage(type) {
@@ -237,7 +246,7 @@
       case "mimicking":
         return "A mimicking soul appears nearby. Corner them before they get away.";
       case "unstable":
-        return "A unstable soul appears nearby.";
+        return "An unstable soul appears nearby.";
       case "vengeful":
         return "A vengeful soul appears nearby! Avoid it until it realises you're not the intended target.";
       default:
@@ -245,30 +254,19 @@
     }
   }
 
-  // ---- OCR helpers (template)
-  async function ocrRect(rect) {
-    // This is intentionally abstract because Alt1 OCR APIs differ by setup.
-    // Many plugins use a1lib + OCR libraries (e.g., ChatboxReader).
-    //
-    // If your environment has `alt1.capture` and `alt1.bindReadString`, you’d implement here.
-    // For now, throw so you’re forced to connect the correct OCR library.
-    throw new Error("OCR not wired: tell me which Alt1 JS libs you’re using (a1lib/ChatboxReader/etc.)");
-  }
+  // ---- Utilities
 
-  // ---- Calibration selection (template)
-  function selectRect() {
-    // If your Alt1 exposes an overlay selection helper, wire it here.
-    // Otherwise we can implement a 2-click top-left/bottom-right flow.
-    return Promise.reject(new Error("Rect selection not wired"));
-  }
-
-  // ---- utilities
-  function normalizeOcr(s) {
+  /**
+   * Strip the RS3 timestamp prefix [HH:MM:SS] (if present),
+   * lowercase, and collapse whitespace for reliable substring matching.
+   */
+  function normalizeLine(s) {
     return (s || "")
+      .replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
       .toLowerCase()
       .replace(/\s+/g, " ")
-      .replace(/[“”]/g, '"')
-      .replace(/[’]/g, "'")
+      .replace(/\u201c|\u201d/g, '"')
+      .replace(/\u2019/g, "'")
       .trim();
   }
 
@@ -299,19 +297,10 @@
       .replaceAll("'", "&#039;");
   }
 
-  function simpleHash(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return String(h >>> 0);
-  }
-
   function loadState() {
     try {
       return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-    } catch {
+    } catch (_) {
       return {};
     }
   }
