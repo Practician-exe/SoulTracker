@@ -104,6 +104,8 @@
   var OVERLAY_GROUP = "st_soul";
   var MANUAL_GROUP = "st_manual";
   var manualPickTimer = null;
+  var manualPickInterval = null;
+  var manualSelectionStart = null;
 
   /**
    * Draw a native Alt1 overlay notification near the current mouse position.
@@ -189,6 +191,13 @@
     } catch (_e) {}
   }
 
+  function clearManualSelectionTimers() {
+    clearTimeout(manualPickTimer);
+    clearInterval(manualPickInterval);
+    manualPickTimer = null;
+    manualPickInterval = null;
+  }
+
   function setButtonsDisabled(disabled) {
     btnManual.disabled = disabled;
     btnClearManual.disabled = disabled;
@@ -229,15 +238,24 @@
   }
 
   function captureMouseAfterCountdown(label, seconds, done) {
-    clearTimeout(manualPickTimer);
+    clearManualSelectionTimers();
     var remaining = seconds;
+    var lastValidPos = null;
+
+    manualPickInterval = setInterval(function () {
+      var pos = getRsMousePos();
+      if (pos) {
+        lastValidPos = pos;
+      }
+    }, 100);
 
     function tick() {
       statusEl.textContent =
         "Manual select: hover " + label + " over the visible chat text area in RS3. Capturing in " + remaining + "...";
 
       if (remaining <= 0) {
-        var pos = getRsMousePos();
+        clearManualSelectionTimers();
+        var pos = getRsMousePos() || lastValidPos;
         done(pos);
         return;
       }
@@ -265,6 +283,7 @@
 
     setButtonsDisabled(true);
     clearManualOverlay();
+    manualSelectionStart = null;
 
     captureMouseAfterCountdown("TOP-LEFT", 3, function (topLeft) {
       if (!topLeft) {
@@ -272,6 +291,9 @@
         statusEl.textContent = "Manual select failed: keep your mouse over the RS3 window during capture.";
         return;
       }
+
+       manualSelectionStart = topLeft;
+       showRectOverlay({ x: topLeft.x - 2, y: topLeft.y - 2, width: 4, height: 4 }, A1lib.mixColor(201, 166, 75), 3500, MANUAL_GROUP);
 
       captureMouseAfterCountdown("BOTTOM-RIGHT", 3, function (bottomRight) {
         setButtonsDisabled(false);
@@ -297,7 +319,8 @@
   });
 
   btnClearManual.addEventListener("click", () => {
-    clearTimeout(manualPickTimer);
+    clearManualSelectionTimers();
+    manualSelectionStart = null;
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
     }
@@ -427,6 +450,10 @@
     let detections;
     try {
       detections = detectSoulTemplates(rect);
+      if (detections.length === 0) {
+        const lines = reader.read() || [];
+        detections = detectSoulsFromLines(lines);
+      }
     } catch (e) {
       statusEl.textContent = "Chat scan error - reselect the chat area and try again.";
       console.error("[SoulTracker] template scan error:", e);
@@ -523,6 +550,53 @@
     }
   }
 
+  function detectSoulsFromLines(lines) {
+    const out = [];
+    for (const line of lines || []) {
+      const normalized = normalizeLine(line && line.text ? line.text : "");
+      const detections = detectSouls(normalized);
+      for (const det of detections) {
+        out.push(det);
+      }
+    }
+    return uniqueBy(out, function (x) { return x.type; });
+  }
+
+  function detectSouls(normalizedText) {
+    const compact = compactForDetection(normalizedText);
+    if (!compact.includes("soul") || !compact.includes("nearby")) return [];
+
+    const hasNearbyPhrase =
+      compact.includes("appearsnearby") ||
+      compact.includes("appearnearby") ||
+      compact.includes("soulappearsnearby") ||
+      compact.includes("soulappearnearby");
+
+    if (!hasNearbyPhrase) return [];
+
+    const out = [];
+    const candidates = [
+      { type: "lost", aliases: ["lost"] },
+      { type: "mimicking", aliases: ["mimicking", "mimicling", "mlmicking"] },
+      { type: "unstable", aliases: ["unstable", "unstabie"] },
+      { type: "vengeful", aliases: ["vengeful", "vengefui"] },
+    ];
+
+    for (const c of candidates) {
+      const matched = c.aliases.some((alias) =>
+        compact.includes(alias + "soul") ||
+        compact.includes("a" + alias + "soul") ||
+        (compact.includes(alias) && compact.includes("soul"))
+      );
+
+      if (matched) {
+        out.push({ type: c.type, message: prettyMessage(c.type) });
+      }
+    }
+
+    return uniqueBy(out, function (x) { return x.type; });
+  }
+
   // ---- Utilities
 
   function clampInt(v, min, max, fallback) {
@@ -538,6 +612,38 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
+  }
+
+  function normalizeLine(s) {
+    return (s || "")
+      .replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/\u201c|\u201d/g, '"')
+      .replace(/\u2019/g, "'")
+      .trim();
+  }
+
+  function compactForDetection(s) {
+    return (s || "")
+      .toLowerCase()
+      .replace(/[|!]/g, "l")
+      .replace(/1/g, "l")
+      .replace(/0/g, "o")
+      .replace(/5/g, "s")
+      .replace(/[^a-z]/g, "");
+  }
+
+  function uniqueBy(arr, keyFn) {
+    const seen = new Set();
+    const out = [];
+    for (const x of arr) {
+      const k = keyFn(x);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(x);
+    }
+    return out;
   }
 
   function loadState() {
