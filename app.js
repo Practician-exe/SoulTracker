@@ -138,50 +138,34 @@
       var ox, oy;
       if (mp === -1) {
         // Centre of the RS3 window as fallback
-        ox = Math.max(4, ((alt1.rsWidth / 2) | 0) - 136);
-        oy = 40;
+        ox = Math.max(4, ((alt1.rsWidth / 2) | 0) - 64);
+        oy = 56;
       } else {
-        ox = (mp >>> 16) + 20;
-        oy = ((mp & 0xFFFF) - 76) | 0;
+        ox = (mp >>> 16) + 18;
+        oy = ((mp & 0xFFFF) - 42) | 0;
       }
-      var width = 288;
-      var height = 82;
+      var width = 132;
+      var height = 28;
       // Clamp so the box stays inside the RS3 window
       ox = Math.max(4, Math.min(ox, alt1.rsWidth - width - 4));
       oy = Math.max(4, Math.min(oy, alt1.rsHeight - height - 4));
 
       var isRed = det.type === "vengeful";
       var accent = isRed ? A1lib.mixColor(255, 92, 92) : A1lib.mixColor(208, 174, 91);
-      var accentSoft = isRed ? A1lib.mixColor(255, 92, 92, 110) : A1lib.mixColor(208, 174, 91, 110);
       var border = isRed ? A1lib.mixColor(255, 132, 132) : A1lib.mixColor(228, 197, 118);
-      var bg = A1lib.mixColor(13, 16, 21, 240);
-      var bgTop = A1lib.mixColor(27, 31, 38, 228);
-      var shadow = A1lib.mixColor(0, 0, 0, 110);
+      var bg = A1lib.mixColor(13, 16, 21, 235);
+      var shadow = A1lib.mixColor(0, 0, 0, 96);
       var fg = A1lib.mixColor(239, 232, 214);
-      var fgSoft = A1lib.mixColor(186, 176, 153);
-      var ms = 4200;
-      var body = det.message.length > 52 ? det.message.slice(0, 49) + "..." : det.message;
+      var ms = 2600;
 
       alt1.overLayClearGroup(OVERLAY_GROUP);
       alt1.overLaySetGroup(OVERLAY_GROUP);
-      // Shadow and outer frame
-      alt1.overLayRect(shadow, ox + 3, oy + 4, width, height, ms, 0);
+      // Small cursor tooltip
+      alt1.overLayRect(shadow, ox + 2, oy + 2, width, height, ms, 0);
       alt1.overLayRect(bg, ox, oy, width, height, ms, 0);
-      alt1.overLayRect(bgTop, ox + 1, oy + 1, width - 2, 24, ms, 0);
       alt1.overLayRect(border, ox, oy, width, height, ms, 1);
-
-      // Accent rail and glow bar
-      alt1.overLayRect(accentSoft, ox + 12, oy + 14, 6, height - 28, ms, 0);
-      alt1.overLayRect(accent, ox + 12, oy + 14, 3, height - 28, ms, 0);
-      alt1.overLayRect(accent, ox, oy, width, 2, ms, 0);
-
-      // Header
-      alt1.overLayText("SOUL TRACKER", fgSoft, 10, ox + 28, oy + 15, ms);
-      alt1.overLayText(det.type.toUpperCase() + " SOUL", accent, 16, ox + 28, oy + 38, ms);
-      alt1.overLayText("detected nearby", fgSoft, 11, ox + 28, oy + 56, ms);
-
-      // Message body
-      alt1.overLayText(body, fg, 11, ox + 28, oy + 71, ms);
+      alt1.overLayRect(accent, ox, oy, 3, height, ms, 0);
+      alt1.overLayText("Soul Detected", fg, 12, ox + 12, oy + 18, ms);
       alt1.overLayFreezeGroup(OVERLAY_GROUP);
       return true;
     } catch (e) {
