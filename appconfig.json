@@ -3,6 +3,6 @@
   "configUrl": "https://practician-exe.github.io/SoulTracker/appconfig.json",
   "appUrl": "./index.html",
   "iconUrl": "./icon.png",
-  "description": "Alt1 OCR chat alert for nearby souls (lost/mimicking/unstable/vengeful).",
+  "description": "Alt1 chat alert for nearby souls in RS3 (lost, mimicking, unstable, vengeful).",
   "permissions": "pixel,gamestate"
 }

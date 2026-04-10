@@ -86,7 +86,7 @@
   } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
     statusEl.textContent = "Chat reader library failed to load.";
   } else {
-    statusEl.textContent = "Alt1 detected. Select the chat area to begin.";
+    statusEl.textContent = "Alt1 detected. Click Drag select to choose the chat area.";
   }
 
   // ---- Cooldown bookkeeping: per soul type
@@ -104,26 +104,10 @@
   if (typeof state.volume === "number") volumeEl.value = String(state.volume);
   setAlertPanelIdle();
 
-  var MANUAL_GROUP = "st_manual";
   var manualSelectionActive = false;
   var selectorCapture = null;
   var selectorRect = null;
   var selectorDragStart = null;
-
-  function showRectOverlay(rect, color, ms, group) {
-    try {
-      alt1.overLayClearGroup(group);
-      alt1.overLaySetGroup(group);
-      alt1.overLayRect(color, rect.x, rect.y, rect.width, rect.height, ms, 2);
-      alt1.overLayFreezeGroup(group);
-    } catch (_e) {}
-  }
-
-  function clearManualOverlay() {
-    try {
-      alt1.overLayClearGroup(MANUAL_GROUP);
-    } catch (_e) {}
-  }
 
   function setButtonsDisabled(disabled) {
     btnManual.disabled = disabled;
@@ -191,8 +175,7 @@
     if (!ok) return false;
     resetVisibleMatches();
     persistManualRect(rect);
-    showRectOverlay(rect, A1lib.mixColor(57, 210, 106), 3500, MANUAL_GROUP);
-    statusEl.textContent = "Manual chat area saved. Watching chat...";
+    statusEl.textContent = "Chat area saved. Watching chat...";
     setAlertPanelIdle();
     return true;
   }
@@ -261,7 +244,6 @@
     selectorDragStart = null;
     manualSelectionActive = true;
     setButtonsDisabled(true);
-    clearManualOverlay();
 
     selectorCanvasEl.width = capture.width;
     selectorCanvasEl.height = capture.height;
@@ -280,8 +262,7 @@
     }
     resetVisibleMatches();
     persistManualRect(null);
-    clearManualOverlay();
-    statusEl.textContent = "Manual chat area cleared. Click Manual select to choose it again.";
+    statusEl.textContent = "Chat area cleared. Click Drag select to choose it again.";
     setAlertPanelIdle();
   });
 
@@ -293,7 +274,10 @@
   });
 
   cooldownSecEl.addEventListener("change", () => persistSettings());
-  scanMsEl.addEventListener("change", () => persistSettings());
+  scanMsEl.addEventListener("change", () => {
+    persistSettings();
+    startLoop();
+  });
   enableSoundEl.addEventListener("change", () => persistSettings());
   volumeEl.addEventListener("input", () => persistSettings());
 
@@ -316,7 +300,7 @@
     };
     closeSelectorModal();
     if (!applyManualRect(rect)) {
-      statusEl.textContent = "Manual select failed: chat reader is not available.";
+      statusEl.textContent = "Drag select failed: chat reader is not available.";
     }
   });
 
@@ -367,7 +351,7 @@
       templatesReady = true;
 
       if (window.SoulChatReader && window.SoulChatReader.hasPosition()) {
-        statusEl.textContent = "Watching chat... templates loaded.";
+        statusEl.textContent = "Watching chat...";
       }
     } catch (e) {
       templateLoadError = e;
@@ -456,7 +440,7 @@
         statusEl.textContent = "Using saved manual chat area. Watching chat...";
       }
     } else {
-      statusEl.textContent = "Click Manual select to choose the visible RS3 chat area.";
+      statusEl.textContent = "Click Drag select to choose the visible RS3 chat area.";
     }
   }
   if (inAlt1 && hasPixelPermission) {
@@ -474,7 +458,7 @@
     }
 
     if (!reader.hasPosition()) {
-      statusEl.textContent = "Click Manual select to choose the visible RS3 chat area.";
+      statusEl.textContent = "Click Drag select to choose the visible RS3 chat area.";
       return;
     }
 
