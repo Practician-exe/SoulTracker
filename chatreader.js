@@ -58,19 +58,15 @@
      */
     find: function () {
       if (!this._ensureReader()) return false;
-      try {
-        var result = this._reader.find();
-        this._found = result !== null;
-        if (this._found) {
-          // Reset streak counter on successful find
-          this._noTimestampStreak = 0;
-        }
-        return this._found;
-      } catch (e) {
-        console.error("[SoulChatReader] find() error:", e);
-        this._found = false;
-        return false;
+      // Do NOT catch here – let the caller handle errors so it can show the
+      // correct message (e.g. "pixel capture not available – install the app").
+      var result = this._reader.find();
+      this._found = result !== null && result !== undefined;
+      if (this._found) {
+        // Reset streak counter on successful find
+        this._noTimestampStreak = 0;
       }
+      return this._found;
     },
 
     /**

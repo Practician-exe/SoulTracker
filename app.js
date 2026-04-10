@@ -17,6 +17,34 @@
   const STORAGE_KEY = "rs3_soul_tracker_v1";
   const state = loadState();
 
+  // ---- Helpers
+
+  /**
+   * Returns the alt1://addapp/ install URL derived from the current page location.
+   */
+  function makeInstallUrl() {
+    return "alt1://addapp/" + new URL("appconfig.json", window.location.href).href;
+  }
+
+  /**
+   * Safely replace statusEl content with a plain-text message followed by a
+   * clickable install link, avoiding innerHTML string injection.
+   *
+   * @param {string} prefix  - Text shown before the link.
+   * @param {string} linkText - Visible link label.
+   * @param {string} [suffix] - Optional text shown after the link; omit or pass "" to skip.
+   */
+  function setStatusWithLink(prefix, linkText, suffix) {
+    statusEl.textContent = "";
+    statusEl.appendChild(document.createTextNode(prefix));
+    const a = document.createElement("a");
+    a.href = makeInstallUrl();
+    a.style.color = "#57d26a";
+    a.textContent = linkText;
+    statusEl.appendChild(a);
+    if (suffix) statusEl.appendChild(document.createTextNode(suffix));
+  }
+
   // ---- Alt1 presence checks
   const inAlt1 = typeof alt1 !== "undefined";
   // When the app is browsed to in Alt1's built-in browser without being installed,
@@ -26,15 +54,11 @@
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
   } else if (!hasPixelPermission) {
-    // Build an alt1://addapp/ link from the current page URL so the user can
-    // install the app with one click.
-    const configUrl =
-      window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
-    const installUrl = "alt1://addapp/" + configUrl;
-    statusEl.innerHTML =
-      "This app needs to be <strong>installed</strong> in Alt1 to scan the chatbox. " +
-      '<a href="' + installUrl + '" style="color:#57d26a">Click here to install</a>, ' +
-      "then reopen it from your Apps panel.";
+    setStatusWithLink(
+      "This app needs to be installed in Alt1 to scan the chatbox. ",
+      "Click here to install",
+      ", then reopen it from your Apps panel."
+    );
     btnRefresh.disabled = true;
   } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
     statusEl.textContent = "Chat reader library failed to load.";
@@ -111,13 +135,11 @@
       return;
     }
     if (!hasPixelPermission) {
-      const configUrl =
-        window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
-      const installUrl = "alt1://addapp/" + configUrl;
-      statusEl.innerHTML =
-        "Pixel permission not granted \u2013 the app must be " +
-        '<a href="' + installUrl + '" style="color:#57d26a">installed in Alt1</a>' +
-        " (not just opened in the browser). Reopen it from your Apps panel after installing.";
+      setStatusWithLink(
+        "Pixel permission not granted \u2013 the app must be ",
+        "installed in Alt1",
+        " (not just opened in the browser). Reopen it from your Apps panel after installing."
+      );
       return;
     }
     if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
@@ -131,9 +153,12 @@
       found = window.SoulChatReader.find();
     } catch (e) {
       console.error("[SoulTracker] calibration error:", e);
-      statusEl.textContent =
-        "Calibration failed \u2013 pixel capture is not available in this context. " +
-        "Make sure the app is installed in Alt1 (not browsed to directly).";
+      setStatusWithLink(
+        "Calibration failed \u2013 pixel capture is not available. " +
+        "The app must be installed in Alt1 (not just opened in the browser). ",
+        "Click here to install",
+        ", then reopen it from your Apps panel."
+      );
       return;
     }
     if (found) {
@@ -183,7 +208,18 @@
   function tryFindChatbox() {
     if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader || !window.SoulChatReader.isAvailable()) return;
     findRetries = 0;
-    const found = window.SoulChatReader.find();
+    let found;
+    try {
+      found = window.SoulChatReader.find();
+    } catch (e) {
+      console.error("[SoulTracker] auto-find error:", e);
+      setStatusWithLink(
+        "Pixel capture failed \u2013 the app may not be properly installed. ",
+        "Reinstall here",
+        " and reopen from your Apps panel."
+      );
+      return;
+    }
     if (found) {
       statusEl.textContent = "Chatbox found. Watching chat...";
     } else {
@@ -214,7 +250,18 @@
     if (!reader.hasPosition()) {
       findRetries++;
       if (findRetries % FIND_RETRY_INTERVAL === 0) {
-        const found = reader.find();
+        let found;
+        try {
+          found = reader.find();
+        } catch (e) {
+          console.error("[SoulTracker] find error in scan loop:", e);
+          setStatusWithLink(
+            "Pixel capture error \u2013 the app may need to be reinstalled. ",
+            "Reinstall here",
+            " and reopen from your Apps panel, or click Refresh to retry."
+          );
+          return;
+        }
         if (found) {
           statusEl.textContent = "Chatbox found. Watching chat...";
           findRetries = 0;
