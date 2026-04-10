@@ -127,17 +127,21 @@
     },
 
     /**
-     * Returns the raw position object from the underlying ChatBoxReader after a
-     * successful find(). The exact shape is library-internal, but it typically
-     * exposes x, y, width, height so callers can draw a calibration overlay.
+     * Returns the bounding rect of the main chatbox after a successful find(),
+     * as a plain {x, y, width, height} object suitable for drawing an overlay.
      * Returns null if no position is known.
+     *
+     * The underlying ChatBoxReader stores pos as { mainbox: { rect: Rect, ... }, boxes: [] },
+     * so we unwrap to mainbox.rect here.
      */
     getPos: function () {
       if (!this._reader || !this._reader.pos) return null;
       var p = this._reader.pos;
-      // pos may be a rect-like object or a more complex structure.
-      // Return it as-is for the caller to inspect.
-      return typeof p === "object" ? p : null;
+      if (p.mainbox && p.mainbox.rect) {
+        return p.mainbox.rect;
+      }
+      // Fallback: if the library ever returns a flat rect directly
+      return (typeof p === "object" && p.x != null) ? p : null;
     },
 
     /**
