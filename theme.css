@@ -1,7 +1,7 @@
 :root{
   --bg:#0b0d10;
-  --panel:#12151b;
-  --panel2:#0f1217;
+  --panel:#10141a;
+  --panel2:#10141a;
   --text:#e7e0cf;
   --muted:#a79f8b;
 
@@ -16,7 +16,7 @@
 }
 
 html, body{
-  background: transparent;
+  background: var(--panel);
   color: var(--text);
   margin:0;
   padding:0;
@@ -30,7 +30,7 @@ html, body{
   width: 100%;
   min-height: 100vh;
   margin: 0;
-  background: linear-gradient(180deg, rgba(21,25,32,.96), rgba(14,17,22,.96));
+  background: var(--panel);
   border-radius: 0;
   box-shadow: none;
   border: none;
@@ -53,7 +53,7 @@ html, body{
 
 .panel__header{
   padding: 12px 12px 10px 12px;
-  background: linear-gradient(180deg, rgba(201,166,75,.10), transparent 70%);
+  background: linear-gradient(180deg, rgba(201,166,75,.08), rgba(201,166,75,0) 70%);
   border-bottom: 1px solid rgba(201,166,75,.18);
 }
 
@@ -83,9 +83,7 @@ html, body{
 .panel__footer{
   margin-top: auto;
   padding: 14px;
-  background:
-    radial-gradient(900px 260px at 50% 0%, rgba(201,166,75,.06), transparent 60%),
-    linear-gradient(180deg, rgba(18,21,27,.96), rgba(14,17,22,.98));
+  background: var(--panel);
   border-top: 1px solid rgba(201,166,75,.12);
 }
 
