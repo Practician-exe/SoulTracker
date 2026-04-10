@@ -19,11 +19,14 @@ html, body{
   background: transparent;
   color: var(--text);
   margin:0;
+  padding:0;
+  width:100%;
+  box-sizing: border-box;
   font-family: "Segoe UI", Tahoma, Arial, sans-serif;
 }
 
 .panel{
-  width: 360px;
+  width: calc(100% - 20px);
   margin: 10px;
   background: linear-gradient(180deg, rgba(21,25,32,.96), rgba(14,17,22,.96));
   border-radius: var(--radius);
@@ -124,7 +127,8 @@ html, body{
   display:flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 160px;
+  flex: 1;
+  min-width: 120px;
 }
 
 .field__label{
@@ -139,6 +143,8 @@ html, body{
   padding: 7px 8px;
   border-radius: 8px;
   outline: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .input:focus{
@@ -179,8 +185,9 @@ html, body{
 .toast{
   position: fixed;
   left: 16px;
+  right: 16px;
   bottom: 16px;
-  width: 360px;
+  width: auto;
   pointer-events:none;
   opacity: 0;
   transform: translateY(10px);

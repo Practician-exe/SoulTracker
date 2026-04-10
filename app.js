@@ -106,12 +106,38 @@
     }
   }
   btnRefresh.addEventListener("click", () => {
-    if (!inAlt1 || !hasPixelPermission || !window.SoulChatReader) return;
-    statusEl.textContent = "Scanning for chatbox...";
+    if (!inAlt1) {
+      statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
+      return;
+    }
+    if (!hasPixelPermission) {
+      const configUrl =
+        window.location.href.replace(/[^/]+$/, "") + "appconfig.json";
+      const installUrl = "alt1://addapp/" + configUrl;
+      statusEl.innerHTML =
+        "Pixel permission not granted \u2013 the app must be " +
+        '<a href="' + installUrl + '" style="color:#57d26a">installed in Alt1</a>' +
+        " (not just opened in the browser). Reopen it from your Apps panel after installing.";
+      return;
+    }
+    if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
+      statusEl.textContent = "Chat reader library failed to load \u2013 try refreshing the app.";
+      return;
+    }
+    statusEl.textContent = "Scanning for chatbox\u2026";
     window.SoulChatReader.reset();
-    const found = window.SoulChatReader.find();
+    let found;
+    try {
+      found = window.SoulChatReader.find();
+    } catch (e) {
+      console.error("[SoulTracker] calibration error:", e);
+      statusEl.textContent =
+        "Calibration failed \u2013 pixel capture is not available in this context. " +
+        "Make sure the app is installed in Alt1 (not browsed to directly).";
+      return;
+    }
     if (found) {
-      statusEl.textContent = "Chatbox found. Watching chat...";
+      statusEl.textContent = "Chatbox found. Watching chat\u2026";
       // Flash a green outline around the detected chatbox so the user can confirm
       // the right region was picked up.
       try {
@@ -124,7 +150,8 @@
         }
       } catch (_) {}
     } else {
-      statusEl.textContent = "Chatbox not found \u2013 make sure RS3 is open and the chat panel is visible, then try again.";
+      statusEl.textContent =
+        "Calibration failed \u2013 make sure RS3 is open and the chatbox is visible, then try again.";
     }
   });
 
