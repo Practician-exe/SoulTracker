@@ -216,6 +216,19 @@
     };
   }
 
+  function clampRectToRs(rect) {
+    var x = Math.max(0, Math.min(rect.x, alt1.rsWidth - 1));
+    var y = Math.max(0, Math.min(rect.y, alt1.rsHeight - 1));
+    var maxWidth = Math.max(1, alt1.rsWidth - x);
+    var maxHeight = Math.max(1, alt1.rsHeight - y);
+    return {
+      x: x,
+      y: y,
+      width: Math.max(1, Math.min(rect.width, maxWidth)),
+      height: Math.max(1, Math.min(rect.height, maxHeight)),
+    };
+  }
+
   function persistManualRect(rect) {
     if (rect) {
       state.manualRect = rect;
@@ -227,6 +240,7 @@
 
   function applyManualRect(rect) {
     if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) return false;
+    rect = clampRectToRs(rect);
     var ok = window.SoulChatReader.setManualRect(rect);
     if (!ok) return false;
     resetVisibleMatches();
@@ -424,6 +438,7 @@
   function detectSoulTemplates(rect) {
     if (!templatesReady || !messageTemplates || !rect) return [];
 
+    rect = clampRectToRs(rect);
     var captured = A1lib.capture(rect.x, rect.y, rect.width, rect.height);
     if (!captured) return [];
 
@@ -495,18 +510,15 @@
     let detections;
     try {
       detections = detectSoulTemplates(rect);
-      if (detections.length === 0) {
-        const lines = reader.read() || [];
-        detections = detectSoulsFromLines(lines);
-      }
     } catch (e) {
-      statusEl.textContent = "Chat scan error - reselect the chat area and try again.";
       console.error("[SoulTracker] template scan error:", e);
-      return;
+      detections = [];
     }
 
     if (detections.length > 0) {
       statusEl.textContent = "Watching chat... (" + new Date().toLocaleTimeString() + ")";
+    } else {
+      statusEl.textContent = "Watching chat...";
     }
 
     for (const det of detections) {
