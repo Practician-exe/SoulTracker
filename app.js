@@ -204,7 +204,7 @@
       audioEl.currentTime = 0;
       const p = audioEl.play();
       if (p && typeof p.catch === "function") p.catch(() => {});
-    } catch (_) {}
+    } catch (_e) { /* audio playback errors are non-fatal */ }
   }
 
   // ---- Detection logic
