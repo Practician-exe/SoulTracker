@@ -16,7 +16,7 @@
   const cooldownSecEl = document.getElementById("cooldownSec");
   const scanMsEl = document.getElementById("scanMs");
   const enableSoundEl = document.getElementById("enableSound");
-  const enableVisualEl = document.getElementById("enableVisual");
+  const volumeEl = document.getElementById("volume");
 
   const STORAGE_KEY = "rs3_soul_tracker_v1";
   const state = loadState();
@@ -72,7 +72,6 @@
   // When the app is browsed to in Alt1's built-in browser without being installed,
   // alt1.permissionPixel is false and pixel capture is blocked by Alt1 itself.
   const hasPixelPermission = inAlt1 && alt1.permissionPixel === true;
-  const hasOverlayPermission = inAlt1 && alt1.permissionOverlay === true;
 
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
@@ -86,9 +85,7 @@
   } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
     statusEl.textContent = "Chat reader library failed to load.";
   } else {
-    statusEl.textContent = hasOverlayPermission
-      ? "Alt1 detected. Select the chat area to begin."
-      : "Alt1 detected. Select the chat area to begin. Game overlay permission is off, so notifications will show in-app.";
+    statusEl.textContent = "Alt1 detected. Select the chat area to begin.";
   }
 
   // ---- Cooldown bookkeeping: per soul type
@@ -103,83 +100,13 @@
   if (typeof state.cooldownSec === "number") cooldownSecEl.value = String(state.cooldownSec);
   if (typeof state.scanMs === "number") scanMsEl.value = String(state.scanMs);
   if (typeof state.enableSound === "boolean") enableSoundEl.checked = state.enableSound;
-  if (typeof state.enableVisual === "boolean") enableVisualEl.checked = state.enableVisual;
+  if (typeof state.volume === "number") volumeEl.value = String(state.volume);
 
-  // ---- Alt1 native overlay (shown near the mouse cursor over the RS3 window)
-  // Group name used for our notifications so we can clear them before redrawing.
-  var OVERLAY_GROUP = "st_soul";
   var MANUAL_GROUP = "st_manual";
   var manualSelectionActive = false;
   var selectorCapture = null;
-  var selectorScale = 1;
   var selectorRect = null;
   var selectorDragStart = null;
-
-  /**
-   * Draw a native Alt1 overlay notification near the current mouse position.
-   * Falls back silently if any overlay API is unavailable.
-   */
-  function showAlt1Overlay(det) {
-    try {
-      if (!inAlt1 || !hasOverlayPermission) return false;
-      if (
-        typeof alt1.overLayClearGroup !== "function" ||
-        typeof alt1.overLaySetGroup !== "function" ||
-        typeof alt1.overLayRect !== "function" ||
-        typeof alt1.overLayText !== "function" ||
-        typeof alt1.overLayFreezeGroup !== "function"
-      ) {
-        return false;
-      }
-
-      // Decode packed mouse position: high 16 bits = x, low 16 bits = y.
-      // Returns -1 when the mouse is not over the RS3 window.
-      var mp = alt1.mousePosition;
-      var ox, oy;
-      if (mp === -1) {
-        // Centre of the RS3 window as fallback
-        ox = Math.max(4, ((alt1.rsWidth / 2) | 0) - 64);
-        oy = 56;
-      } else {
-        ox = (mp >>> 16) + 18;
-        oy = ((mp & 0xFFFF) - 42) | 0;
-      }
-      var width = 132;
-      var height = 28;
-      // Clamp so the box stays inside the RS3 window
-      ox = Math.max(4, Math.min(ox, alt1.rsWidth - width - 4));
-      oy = Math.max(4, Math.min(oy, alt1.rsHeight - height - 4));
-
-      var isRed = det.type === "vengeful";
-      var accent = isRed ? A1lib.mixColor(255, 92, 92) : A1lib.mixColor(208, 174, 91);
-      var border = isRed ? A1lib.mixColor(255, 132, 132) : A1lib.mixColor(228, 197, 118);
-      var bg = A1lib.mixColor(13, 16, 21, 235);
-      var shadow = A1lib.mixColor(0, 0, 0, 96);
-      var fg = A1lib.mixColor(239, 232, 214);
-      var ms = 2600;
-
-      alt1.overLayClearGroup(OVERLAY_GROUP);
-      alt1.overLaySetGroup(OVERLAY_GROUP);
-      // Small cursor tooltip
-      alt1.overLayRect(shadow, ox + 2, oy + 2, width, height, ms, 0);
-      alt1.overLayRect(bg, ox, oy, width, height, ms, 0);
-      alt1.overLayRect(border, ox, oy, width, height, ms, 1);
-      alt1.overLayRect(accent, ox, oy, 3, height, ms, 0);
-      alt1.overLayText("Soul Detected", fg, 12, ox + 12, oy + 18, ms);
-      alt1.overLayFreezeGroup(OVERLAY_GROUP);
-      return true;
-    } catch (e) {
-      console.warn("[SoulTracker] overlay error:", e);
-      return false;
-    }
-  }
-
-  function getRsMousePos() {
-    if (!inAlt1) return null;
-    var mp = alt1.mousePosition;
-    if (mp === -1) return null;
-    return { x: mp >>> 16, y: mp & 0xFFFF };
-  }
 
   function showRectOverlay(rect, color, ms, group) {
     try {
@@ -318,7 +245,6 @@
     }
 
     selectorCapture = capture;
-    selectorScale = 1;
     selectorRect = null;
     selectorDragStart = null;
     manualSelectionActive = true;
@@ -356,7 +282,7 @@
   cooldownSecEl.addEventListener("change", () => persistSettings());
   scanMsEl.addEventListener("change", () => persistSettings());
   enableSoundEl.addEventListener("change", () => persistSettings());
-  enableVisualEl.addEventListener("change", () => persistSettings());
+  volumeEl.addEventListener("input", () => persistSettings());
 
   btnSelectorClose.addEventListener("click", () => {
     closeSelectorModal();
@@ -409,7 +335,7 @@
     state.cooldownSec = clampInt(cooldownSecEl.value, 1, 600, 30);
     state.scanMs = clampInt(scanMsEl.value, 100, 2000, 350);
     state.enableSound = !!enableSoundEl.checked;
-    state.enableVisual = !!enableVisualEl.checked;
+    state.volume = clampInt(volumeEl.value, 0, 100, 70);
     saveState(state);
   }
 
@@ -593,15 +519,7 @@
   }
 
   function fireAlert(det) {
-    if (enableVisualEl.checked) {
-      var shownInOverlay = false;
-      if (inAlt1) {
-        shownInOverlay = showAlt1Overlay(det);
-      }
-      if (!shownInOverlay || !inAlt1) {
-        showToast(det);
-      }
-    }
+    showToast(det);
     if (enableSoundEl.checked) {
       playSound();
     }
@@ -622,6 +540,7 @@
 
   function playSound() {
     try {
+      audioEl.volume = clampInt(volumeEl.value, 0, 100, 70) / 100;
       audioEl.currentTime = 0;
       const p = audioEl.play();
       if (p && typeof p.catch === "function") p.catch(() => {});

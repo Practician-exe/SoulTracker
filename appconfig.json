@@ -4,5 +4,5 @@
   "appUrl": "./index.html",
   "iconUrl": "./icon.png",
   "description": "Alt1 OCR chat alert for nearby souls (lost/mimicking/unstable/vengeful).",
-  "permissions": "pixel,overlay,gamestate"
+  "permissions": "pixel,gamestate"
 }

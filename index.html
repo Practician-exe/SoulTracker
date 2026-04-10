@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="alt1:name" content="RS3 Soul Tracker" />
     <meta name="alt1:size" content="380x460" />
-    <meta name="alt1:permissions" content="pixel overlay gamestate" />
+    <meta name="alt1:permissions" content="pixel gamestate" />
     <title>RS3 Soul Tracker</title>
     <link rel="stylesheet" href="theme.css" />
   </head>
@@ -48,9 +48,9 @@
             <span>Sound</span>
           </label>
 
-          <label class="check">
-            <input type="checkbox" id="enableVisual" checked />
-            <span>Game overlay</span>
+          <label class="field" style="min-width: 140px;">
+            <div class="field__label">Volume</div>
+            <input id="volume" class="input input--range" type="range" min="0" max="100" value="70" />
           </label>
         </div>
       </div>
