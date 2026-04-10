@@ -127,6 +127,20 @@
     },
 
     /**
+     * Returns the raw position object from the underlying ChatBoxReader after a
+     * successful find(). The exact shape is library-internal, but it typically
+     * exposes x, y, width, height so callers can draw a calibration overlay.
+     * Returns null if no position is known.
+     */
+    getPos: function () {
+      if (!this._reader || !this._reader.pos) return null;
+      var p = this._reader.pos;
+      // pos may be a rect-like object or a more complex structure.
+      // Return it as-is for the caller to inspect.
+      return typeof p === "object" ? p : null;
+    },
+
+    /**
      * Reset internal state (useful when refreshing detection).
      */
     reset: function () {

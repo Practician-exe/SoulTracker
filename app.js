@@ -41,12 +41,76 @@
   if (typeof state.enableSound === "boolean") enableSoundEl.checked = state.enableSound;
   if (typeof state.enableVisual === "boolean") enableVisualEl.checked = state.enableVisual;
 
-  // ---- Button handlers
+  // ---- Alt1 native overlay (shown near the mouse cursor over the RS3 window)
+  // Group name used for our notifications so we can clear them before redrawing.
+  var OVERLAY_GROUP = "st_soul";
+  var CALIBRATE_GROUP = "st_cal";
+
+  /**
+   * Draw a native Alt1 overlay notification near the current mouse position.
+   * Falls back silently if any overlay API is unavailable.
+   */
+  function showAlt1Overlay(det) {
+    try {
+      // Decode packed mouse position: high 16 bits = x, low 16 bits = y.
+      // Returns -1 when the mouse is not over the RS3 window.
+      var mp = alt1.mousePosition;
+      var ox, oy;
+      if (mp === -1) {
+        // Centre of the RS3 window as fallback
+        ox = Math.max(4, ((alt1.rsWidth / 2) | 0) - 110);
+        oy = 40;
+      } else {
+        ox = (mp >>> 16) + 20;
+        oy = ((mp & 0xFFFF) - 64) | 0;
+      }
+      // Clamp so the box stays inside the RS3 window
+      ox = Math.max(4, Math.min(ox, alt1.rsWidth - 224));
+      oy = Math.max(4, Math.min(oy, alt1.rsHeight - 58));
+
+      var isRed  = det.type === "vengeful";
+      var accent = isRed ? A1lib.mixColor(255, 90, 90) : A1lib.mixColor(57, 210, 106);
+      var bg     = A1lib.mixColor(14, 17, 22, 220);
+      var fg     = A1lib.mixColor(231, 224, 207);
+      var ms     = 4000;
+
+      alt1.overLayClearGroup(OVERLAY_GROUP);
+      alt1.overLaySetGroup(OVERLAY_GROUP);
+      // Dark background panel
+      alt1.overLayRect(bg, ox, oy, 220, 52, ms, 0);
+      // Accent top strip (2 px filled rect)
+      alt1.overLayRect(accent, ox, oy, 220, 2, ms, 0);
+      // Title: "<TYPE> SOUL DETECTED"
+      alt1.overLayText(det.type.toUpperCase() + " SOUL DETECTED", accent, 13, ox + 6, oy + 17, ms);
+      // Message (truncated to fit the box width)
+      var msg = det.message.length > 47 ? det.message.slice(0, 44) + "..." : det.message;
+      alt1.overLayText(msg, fg, 11, ox + 6, oy + 36, ms);
+      alt1.overLayFreezeGroup(OVERLAY_GROUP);
+    } catch (e) {
+      console.warn("[SoulTracker] overlay error:", e);
+    }
+  }
   btnRefresh.addEventListener("click", () => {
     if (!inAlt1 || !window.SoulChatReader) return;
-    statusEl.textContent = "Re-scanning for chatbox...";
+    statusEl.textContent = "Scanning for chatbox...";
     window.SoulChatReader.reset();
-    tryFindChatbox();
+    const found = window.SoulChatReader.find();
+    if (found) {
+      statusEl.textContent = "Chatbox found. Watching chat...";
+      // Flash a green outline around the detected chatbox so the user can confirm
+      // the right region was picked up.
+      try {
+        const pos = window.SoulChatReader.getPos();
+        if (pos && pos.x != null) {
+          alt1.overLayClearGroup(CALIBRATE_GROUP);
+          alt1.overLaySetGroup(CALIBRATE_GROUP);
+          alt1.overLayRect(A1lib.mixColor(57, 210, 106), pos.x, pos.y, pos.width, pos.height, 2500, 2);
+          alt1.overLayFreezeGroup(CALIBRATE_GROUP);
+        }
+      } catch (_) {}
+    } else {
+      statusEl.textContent = "Chatbox not found \u2013 make sure RS3 is open and the chat panel is visible, then try again.";
+    }
   });
 
   btnTest.addEventListener("click", () => {
@@ -162,7 +226,11 @@
     addLogLine(det.type, det.message);
 
     if (enableVisualEl.checked) {
-      showToast(det);
+      if (inAlt1) {
+        showAlt1Overlay(det);
+      } else {
+        showToast(det);
+      }
     }
     if (enableSoundEl.checked) {
       playSound();
