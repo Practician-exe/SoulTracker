@@ -17,6 +17,21 @@
 
   const STORAGE_KEY = "rs3_soul_tracker_v1";
   const state = loadState();
+  const TEMPLATE_PATHS = {
+    lost: "templates/lost_soul.png",
+    unstable: "templates/unstable_soul.png",
+    mimicking: "templates/mimicking_soul.png",
+    vengeful: "templates/vengeful_soul.png",
+  };
+  const visibleMatches = {
+    lost: false,
+    unstable: false,
+    mimicking: false,
+    vengeful: false,
+  };
+  let messageTemplates = null;
+  let templatesReady = false;
+  let templateLoadError = null;
 
   // ---- Helpers
 
@@ -51,6 +66,7 @@
   // When the app is browsed to in Alt1's built-in browser without being installed,
   // alt1.permissionPixel is false and pixel capture is blocked by Alt1 itself.
   const hasPixelPermission = inAlt1 && alt1.permissionPixel === true;
+  const hasOverlayPermission = inAlt1 && alt1.permissionOverlay === true;
 
   if (!inAlt1) {
     statusEl.textContent = "Open this inside Alt1 Toolkit (alt1 not detected).";
@@ -64,7 +80,9 @@
   } else if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) {
     statusEl.textContent = "Chat reader library failed to load.";
   } else {
-    statusEl.textContent = "Alt1 detected. Select the chat area to begin.";
+    statusEl.textContent = hasOverlayPermission
+      ? "Alt1 detected. Select the chat area to begin."
+      : "Alt1 detected. Select the chat area to begin. Game overlay permission is off, so notifications will show in-app.";
   }
 
   // ---- Cooldown bookkeeping: per soul type
@@ -93,6 +111,17 @@
    */
   function showAlt1Overlay(det) {
     try {
+      if (!inAlt1 || !hasOverlayPermission) return false;
+      if (
+        typeof alt1.overLayClearGroup !== "function" ||
+        typeof alt1.overLaySetGroup !== "function" ||
+        typeof alt1.overLayRect !== "function" ||
+        typeof alt1.overLayText !== "function" ||
+        typeof alt1.overLayFreezeGroup !== "function"
+      ) {
+        return false;
+      }
+
       // Decode packed mouse position: high 16 bits = x, low 16 bits = y.
       // Returns -1 when the mouse is not over the RS3 window.
       var mp = alt1.mousePosition;
@@ -131,8 +160,10 @@
       var msg = det.message.length > 48 ? det.message.slice(0, 45) + "..." : det.message;
       alt1.overLayText(msg, fg, 11, ox + 8, oy + 50, ms);
       alt1.overLayFreezeGroup(OVERLAY_GROUP);
+      return true;
     } catch (e) {
       console.warn("[SoulTracker] overlay error:", e);
+      return false;
     }
   }
 
@@ -190,6 +221,7 @@
     if (!window.SoulChatReader || !window.SoulChatReader.isAvailable()) return false;
     var ok = window.SoulChatReader.setManualRect(rect);
     if (!ok) return false;
+    resetVisibleMatches();
     persistManualRect(rect);
     showRectOverlay(rect, A1lib.mixColor(57, 210, 106), 3500, MANUAL_GROUP);
     statusEl.textContent = "Manual chat area saved. Watching chat...";
@@ -269,6 +301,7 @@
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
     }
+    resetVisibleMatches();
     persistManualRect(null);
     clearManualOverlay();
     statusEl.textContent = "Manual chat area cleared. Click Manual select to choose it again.";
@@ -294,6 +327,55 @@
     saveState(state);
   }
 
+  async function loadMessageTemplates() {
+    if (templatesReady || templateLoadError) return;
+
+    try {
+      const entries = await Promise.all(
+        Object.entries(TEMPLATE_PATHS).map(async ([type, url]) => {
+          const image = await A1lib.imageDataFromUrl(new URL(url, window.location.href).href);
+          return [type, image];
+        })
+      );
+
+      messageTemplates = Object.fromEntries(entries);
+      templatesReady = true;
+
+      if (window.SoulChatReader && window.SoulChatReader.hasPosition()) {
+        statusEl.textContent = "Watching chat... templates loaded.";
+      }
+    } catch (e) {
+      templateLoadError = e;
+      console.error("[SoulTracker] template load error:", e);
+      statusEl.textContent = "Failed to load soul message templates.";
+    }
+  }
+
+  function resetVisibleMatches() {
+    Object.keys(visibleMatches).forEach((type) => {
+      visibleMatches[type] = false;
+    });
+  }
+
+  function detectSoulTemplates(rect) {
+    if (!templatesReady || !messageTemplates || !rect) return [];
+
+    var captured = A1lib.capture(rect.x, rect.y, rect.width, rect.height);
+    if (!captured) return [];
+
+    const detections = [];
+    Object.entries(messageTemplates).forEach(([type, template]) => {
+      const matches = captured.findSubimage(template);
+      const found = matches && matches.length > 0;
+      if (found && !visibleMatches[type]) {
+        detections.push({ type: type, message: prettyMessage(type) });
+      }
+      visibleMatches[type] = found;
+    });
+
+    return detections;
+  }
+
   // ---- Main scan loop
   let timer = null;
   function startLoop() {
@@ -312,6 +394,9 @@
       statusEl.textContent = "Click Manual select to choose the visible RS3 chat area.";
     }
   }
+  if (inAlt1 && hasPixelPermission) {
+    loadMessageTemplates();
+  }
   startLoop();
 
   function scanTick() {
@@ -324,33 +409,36 @@
       return;
     }
 
-    // Read new chat lines since last tick.
-    let lines;
-    try {
-      lines = reader.read();
-    } catch (e) {
-      statusEl.textContent = "Chat read error - click Refresh to retry.";
-      console.error("[SoulTracker] read error:", e);
+    if (!templatesReady) {
+      if (!templateLoadError) {
+        statusEl.textContent = "Loading soul message templates...";
+      }
       return;
     }
 
-    if (!lines) return;
+    if (templateLoadError) {
+      statusEl.textContent = "Failed to load soul message templates.";
+      return;
+    }
 
-    // Warn if RS3 timestamps appear to be disabled.
-    if (reader.timestampsLikelyDisabled()) {
-      statusEl.textContent =
-        "Enable RS3 chat timestamps (Chat Settings > Timestamp) for best results.";
-    } else if (lines.length > 0) {
+    const rect = reader.getPos();
+    if (!rect) return;
+
+    let detections;
+    try {
+      detections = detectSoulTemplates(rect);
+    } catch (e) {
+      statusEl.textContent = "Chat scan error - reselect the chat area and try again.";
+      console.error("[SoulTracker] template scan error:", e);
+      return;
+    }
+
+    if (detections.length > 0) {
       statusEl.textContent = "Watching chat... (" + new Date().toLocaleTimeString() + ")";
     }
 
-    // Check each new line for soul messages.
-    for (const line of lines) {
-      const normalized = normalizeLine(line.text);
-      const detections = detectSouls(normalized);
-      for (const det of detections) {
-        maybeAlert(det);
-      }
+    for (const det of detections) {
+      maybeAlert(det);
     }
   }
 
@@ -369,9 +457,11 @@
     addLogLine(det.type, det.message);
 
     if (enableVisualEl.checked) {
+      var shownInOverlay = false;
       if (inAlt1) {
-        showAlt1Overlay(det);
-      } else {
+        shownInOverlay = showAlt1Overlay(det);
+      }
+      if (!shownInOverlay) {
         showToast(det);
       }
     }
@@ -418,47 +508,6 @@
     } catch (_e) { /* audio playback errors are non-fatal */ }
   }
 
-  // ---- Detection logic
-
-  /**
-   * Detect soul messages in a single (already-normalized) chat line.
-   * Returns an array of {type, message} objects.
-   */
-  function detectSouls(normalizedText) {
-    const compact = compactForDetection(normalizedText);
-    if (!compact.includes("soul") || !compact.includes("nearby")) return [];
-
-    const hasNearbyPhrase =
-      compact.includes("appearsnearby") ||
-      compact.includes("appearnearby") ||
-      compact.includes("soulappearsnearby") ||
-      compact.includes("soulappearnearby");
-
-    if (!hasNearbyPhrase) return [];
-
-    const out = [];
-    const candidates = [
-      { type: "lost", key: "lost", aliases: ["lost"] },
-      { type: "mimicking", key: "mimicking", aliases: ["mimicking", "mimicking", "mimicling"] },
-      { type: "unstable", key: "unstable", aliases: ["unstable", "unstablee"] },
-      { type: "vengeful", key: "vengeful", aliases: ["vengeful", "vengeful", "vengefui"] },
-    ];
-
-    for (const c of candidates) {
-      const matched = c.aliases.some((alias) =>
-        compact.includes(alias + "soul") ||
-        compact.includes("a" + alias + "soul") ||
-        (compact.includes(alias) && compact.includes("soul"))
-      );
-
-      if (matched) {
-        out.push({ type: c.type, message: prettyMessage(c.type) });
-      }
-    }
-
-    return uniqueBy(out, function(x) { return x.type; });
-  }
-
   function prettyMessage(type) {
     switch (type) {
       case "lost":
@@ -475,41 +524,6 @@
   }
 
   // ---- Utilities
-
-  /**
-   * Strip the RS3 timestamp prefix [HH:MM:SS] (if present),
-   * lowercase, and collapse whitespace for reliable substring matching.
-   */
-  function normalizeLine(s) {
-    return (s || "")
-      .replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "")
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .replace(/\u201c|\u201d/g, '"')
-      .replace(/\u2019/g, "'")
-      .trim();
-  }
-
-  function compactForDetection(s) {
-    return (s || "")
-      .toLowerCase()
-      .replace(/[|!1il]/g, "l")
-      .replace(/0/g, "o")
-      .replace(/5/g, "s")
-      .replace(/[^a-z]/g, "");
-  }
-
-  function uniqueBy(arr, keyFn) {
-    const seen = new Set();
-    const out = [];
-    for (const x of arr) {
-      const k = keyFn(x);
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(x);
-    }
-    return out;
-  }
 
   function clampInt(v, min, max, fallback) {
     const n = parseInt(String(v), 10);
