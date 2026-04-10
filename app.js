@@ -104,6 +104,7 @@
   var OVERLAY_GROUP = "st_soul";
   var MANUAL_GROUP = "st_manual";
   var manualSelectionStart = null;
+  var manualSelectionActive = false;
 
   /**
    * Draw a native Alt1 overlay notification near the current mouse position.
@@ -249,6 +250,7 @@
     }
 
     if (!manualSelectionStart) {
+      manualSelectionActive = true;
       manualSelectionStart = pos;
       clearManualOverlay();
       showRectOverlay(
@@ -263,12 +265,14 @@
 
     var rect = normalizeRect(manualSelectionStart, pos);
     if (rect.width < 120 || rect.height < 40) {
+      manualSelectionActive = false;
       manualSelectionStart = null;
       clearManualOverlay();
       statusEl.textContent = "Manual select failed: the selected area was too small. Start again from the top-left corner.";
       return;
     }
 
+    manualSelectionActive = false;
     manualSelectionStart = null;
     if (!applyManualRect(rect)) {
       statusEl.textContent = "Manual select failed: chat reader is not available.";
@@ -279,6 +283,7 @@
   });
 
   btnClearManual.addEventListener("click", () => {
+    manualSelectionActive = false;
     manualSelectionStart = null;
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
@@ -385,6 +390,10 @@
     if (!inAlt1 || !hasPixelPermission) return;
     const reader = window.SoulChatReader;
     if (!reader || !reader.isAvailable()) return;
+
+    if (manualSelectionActive) {
+      return;
+    }
 
     if (!reader.hasPosition()) {
       statusEl.textContent = "Click Manual select to choose the visible RS3 chat area.";
