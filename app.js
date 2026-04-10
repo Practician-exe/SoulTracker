@@ -5,6 +5,10 @@
   const toastTitleEl = document.getElementById("toastTitle");
   const toastBodyEl = document.getElementById("toastBody");
   const audioEl = document.getElementById("alertAudio");
+  const selectorModalEl = document.getElementById("selectorModal");
+  const selectorCanvasEl = document.getElementById("selectorCanvas");
+  const btnSelectorClose = document.getElementById("btnSelectorClose");
+  const btnSelectorSave = document.getElementById("btnSelectorSave");
 
   const btnManual = document.getElementById("btnManual");
   const btnClearManual = document.getElementById("btnClearManual");
@@ -103,14 +107,11 @@
   // Group name used for our notifications so we can clear them before redrawing.
   var OVERLAY_GROUP = "st_soul";
   var MANUAL_GROUP = "st_manual";
-  var manualSelectionStart = null;
   var manualSelectionActive = false;
-  var manualSelectionPhase = null;
-  var armedCaptureInterval = null;
-  var armedCaptureLastPos = null;
-  var armedCaptureStableMs = 0;
-  var lastCaptureTickAt = 0;
-  var ARMED_CAPTURE_THRESHOLD_MS = 500;
+  var selectorCapture = null;
+  var selectorScale = 1;
+  var selectorRect = null;
+  var selectorDragStart = null;
 
   /**
    * Draw a native Alt1 overlay notification near the current mouse position.
@@ -196,14 +197,6 @@
     } catch (_e) {}
   }
 
-  function stopArmedCapture() {
-    clearInterval(armedCaptureInterval);
-    armedCaptureInterval = null;
-    armedCaptureLastPos = null;
-    armedCaptureStableMs = 0;
-    lastCaptureTickAt = 0;
-  }
-
   function setButtonsDisabled(disabled) {
     btnManual.disabled = disabled;
     btnClearManual.disabled = disabled;
@@ -243,52 +236,47 @@
     return true;
   }
 
-  function samePoint(a, b) {
-    if (!a || !b) return false;
-    return Math.abs(a.x - b.x) <= 2 && Math.abs(a.y - b.y) <= 2;
+  function drawSelectorCanvas() {
+    if (!selectorCapture || !selectorCanvasEl) return;
+    var ctx = selectorCanvasEl.getContext("2d");
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, selectorCanvasEl.width, selectorCanvasEl.height);
+    ctx.putImageData(
+      selectorCapture.toDrawableData ? selectorCapture.toDrawableData() : selectorCapture,
+      0,
+      0
+    );
+
+    if (!selectorRect || selectorRect.width <= 0 || selectorRect.height <= 0) return;
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillRect(0, 0, selectorCanvasEl.width, selectorCanvasEl.height);
+    ctx.clearRect(selectorRect.x, selectorRect.y, selectorRect.width, selectorRect.height);
+    ctx.strokeStyle = "rgba(201, 166, 75, 0.95)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(selectorRect.x + 0.5, selectorRect.y + 0.5, selectorRect.width, selectorRect.height);
   }
 
-  function startArmedCapture(phase, onCapture) {
-    stopArmedCapture();
-    manualSelectionActive = true;
-    manualSelectionPhase = phase;
-    lastCaptureTickAt = Date.now();
-
-    armedCaptureInterval = setInterval(function () {
-      var now = Date.now();
-      var dt = now - lastCaptureTickAt;
-      lastCaptureTickAt = now;
-
-      var pos = getRsMousePos();
-      if (!pos) {
-        armedCaptureLastPos = null;
-        armedCaptureStableMs = 0;
-        statusEl.textContent =
-          "Manual select: move your mouse over the " + phase + " corner inside the RS3 chat area and hold it still.";
-        return;
-      }
-
-      if (samePoint(pos, armedCaptureLastPos)) {
-        armedCaptureStableMs += dt;
-      } else {
-        armedCaptureLastPos = pos;
-        armedCaptureStableMs = 0;
-      }
-
-      var remaining = Math.max(0, ARMED_CAPTURE_THRESHOLD_MS - armedCaptureStableMs);
-      statusEl.textContent =
-        "Manual select: hold on the " + phase + " corner inside the RS3 chat area for " +
-        Math.ceil(remaining / 100) / 10 + "s.";
-
-      if (armedCaptureStableMs >= ARMED_CAPTURE_THRESHOLD_MS) {
-        var captured = armedCaptureLastPos;
-        stopArmedCapture();
-        onCapture(captured);
-      }
-    }, 50);
+  function canvasPointFromEvent(event) {
+    var rect = selectorCanvasEl.getBoundingClientRect();
+    var scaleX = selectorCanvasEl.width / rect.width;
+    var scaleY = selectorCanvasEl.height / rect.height;
+    var x = Math.max(0, Math.min(selectorCanvasEl.width, (event.clientX - rect.left) * scaleX));
+    var y = Math.max(0, Math.min(selectorCanvasEl.height, (event.clientY - rect.top) * scaleY));
+    return { x: Math.round(x), y: Math.round(y) };
   }
 
-  function startManualSelection() {
+  function closeSelectorModal() {
+    manualSelectionActive = false;
+    selectorCapture = null;
+    selectorRect = null;
+    selectorDragStart = null;
+    selectorModalEl.hidden = true;
+    setButtonsDisabled(false);
+  }
+
+  function openSelectorModal() {
     if (!inAlt1) {
       statusEl.textContent = "Open this app inside Alt1 Toolkit first.";
       return;
@@ -301,48 +289,32 @@
       );
       return;
     }
-
-    if (!manualSelectionStart) {
-      clearManualOverlay();
-      startArmedCapture("top-left", function (pos) {
-        manualSelectionStart = pos;
-        showRectOverlay(
-          { x: pos.x - 3, y: pos.y - 3, width: 6, height: 6 },
-          A1lib.mixColor(201, 166, 75),
-          5000,
-          MANUAL_GROUP
-        );
-        startArmedCapture("bottom-right", function (bottomRight) {
-          var rect = normalizeRect(manualSelectionStart, bottomRight);
-          if (rect.width < 120 || rect.height < 40) {
-            manualSelectionActive = false;
-            manualSelectionPhase = null;
-            manualSelectionStart = null;
-            clearManualOverlay();
-            statusEl.textContent = "Manual select failed: the selected area was too small. Start again from the top-left corner.";
-            return;
-          }
-
-          manualSelectionActive = false;
-          manualSelectionPhase = null;
-          manualSelectionStart = null;
-          if (!applyManualRect(rect)) {
-            statusEl.textContent = "Manual select failed: chat reader is not available.";
-          }
-        });
-      });
+    var capture = A1lib.capture(0, 0, alt1.rsWidth, alt1.rsHeight);
+    if (!capture) {
+      statusEl.textContent = "Could not capture the RS3 window. Make sure it is visible, then try again.";
       return;
     }
+
+    selectorCapture = capture;
+    selectorScale = 1;
+    selectorRect = null;
+    selectorDragStart = null;
+    manualSelectionActive = true;
+    setButtonsDisabled(true);
+    clearManualOverlay();
+
+    selectorCanvasEl.width = capture.width;
+    selectorCanvasEl.height = capture.height;
+    selectorModalEl.hidden = false;
+    drawSelectorCanvas();
+    statusEl.textContent = "Drag a box around the visible RS3 chat text area, then save the selection.";
   }
   btnManual.addEventListener("click", () => {
-    startManualSelection();
+    openSelectorModal();
   });
 
   btnClearManual.addEventListener("click", () => {
-    stopArmedCapture();
     manualSelectionActive = false;
-    manualSelectionPhase = null;
-    manualSelectionStart = null;
     if (window.SoulChatReader) {
       window.SoulChatReader.clearManualRect();
     }
@@ -363,6 +335,53 @@
   scanMsEl.addEventListener("change", () => persistSettings());
   enableSoundEl.addEventListener("change", () => persistSettings());
   enableVisualEl.addEventListener("change", () => persistSettings());
+
+  btnSelectorClose.addEventListener("click", () => {
+    closeSelectorModal();
+    statusEl.textContent = "Selection cancelled.";
+  });
+
+  btnSelectorSave.addEventListener("click", () => {
+    if (!selectorRect || selectorRect.width < 120 || selectorRect.height < 40) {
+      statusEl.textContent = "Selection is too small. Drag a larger box around the chat text area.";
+      return;
+    }
+
+    var rect = {
+      x: selectorRect.x,
+      y: selectorRect.y,
+      width: selectorRect.width,
+      height: selectorRect.height,
+    };
+    closeSelectorModal();
+    if (!applyManualRect(rect)) {
+      statusEl.textContent = "Manual select failed: chat reader is not available.";
+    }
+  });
+
+  selectorCanvasEl.addEventListener("pointerdown", (event) => {
+    if (!selectorCapture) return;
+    selectorDragStart = canvasPointFromEvent(event);
+    selectorRect = { x: selectorDragStart.x, y: selectorDragStart.y, width: 0, height: 0 };
+    selectorCanvasEl.setPointerCapture(event.pointerId);
+    drawSelectorCanvas();
+  });
+
+  selectorCanvasEl.addEventListener("pointermove", (event) => {
+    if (!selectorDragStart) return;
+    var point = canvasPointFromEvent(event);
+    selectorRect = normalizeRect(selectorDragStart, point);
+    drawSelectorCanvas();
+  });
+
+  selectorCanvasEl.addEventListener("pointerup", (event) => {
+    if (!selectorDragStart) return;
+    var point = canvasPointFromEvent(event);
+    selectorRect = normalizeRect(selectorDragStart, point);
+    selectorDragStart = null;
+    selectorCanvasEl.releasePointerCapture(event.pointerId);
+    drawSelectorCanvas();
+  });
 
   function persistSettings() {
     state.cooldownSec = clampInt(cooldownSecEl.value, 1, 600, 30);
