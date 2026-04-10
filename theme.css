@@ -28,7 +28,7 @@ html, body{
 
 .panel{
   width: 100%;
-  min-height: 100vh;
+  min-height: 100%;
   margin: 0;
   background: var(--panel);
   border-radius: 0;
@@ -36,8 +36,6 @@ html, body{
   border: none;
   position: relative;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
 }
 
 .panel::before{
@@ -81,7 +79,6 @@ html, body{
 }
 
 .panel__footer{
-  margin-top: auto;
   padding: 14px;
   background: var(--panel);
   border-top: 1px solid rgba(201,166,75,.12);
