@@ -1,7 +1,8 @@
 {
   "appName": "RS3 Soul Tracker",
+  "configUrl": "https://practician-exe.github.io/SoulTracker/appconfig.json",
   "appUrl": "./index.html",
   "iconUrl": "./icon.png",
   "description": "Alt1 OCR chat alert for nearby souls (lost/mimicking/unstable/vengeful).",
-  "permissions": ["pixel"]
+  "permissions": ["pixel", "overlay", "gamestate"]
 }
